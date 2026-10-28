@@ -1,0 +1,4 @@
+slixmpp>=1.17,<2
+slixmpp-omemo>=2.2
+aiohttp>=3.9
+cryptography>=41

@@ -1,0 +1,117 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  opencode-xmpp — the XMPP bridge for the opencode CLI
+#
+#  Bot account:        bot@example.org
+#  Password:           secrets/account.secret  (0600, not in git)
+#  Admin users:        [policy] owners — e.g. local@example.org
+#                      → full tools: terminal, files, projects, web
+#  Everyone else:      read-only tools (read, glob, grep, web)
+#
+#  Model credentials are NOT here. Run `opencode auth login` once; the bridge
+#  runs the CLI as your user and the CLI owns provider authentication.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[account]
+jid = "bot@example.org"
+# host = "example.org"          # optional; omitted means DNS SRV discovery
+port = 5222
+resource = "opencode"
+starttls = true
+password_file = "secrets/account.secret"
+
+# ── Admin tier: full toolset ─────────────────────────────────────────────────
+# The agent id must exist as a Markdown agent in opencode's agent directory
+# (~/.config/opencode/agents/xmpp-admin.md). `opencode-xmpp init` installs the
+# shipped agents there.
+[admin]
+agent = "xmpp-admin"
+# model = "ollama/gemma4:latest"   # empty = every provider opencode knows
+timeout_s = 600
+auto_approve = true
+
+# ── Everyone else: read-only tools; no shell, edits or subagents ─────────────
+[guest]
+agent = "xmpp-guest"
+# model = ""
+timeout_s = 180
+auto_approve = true
+
+[opencode]
+# Path or name of the CLI. An absolute path is safest under systemd.
+binary = "opencode"
+# Working directory for every run. Sessions are stored per Location in opencode,
+# so keep this stable: changing it changes where opencode looks for a session.
+workspace = "~"
+# 0 = rely on opencode's automatic compaction. N > 0 also asks opencode to
+# compact after every N answered turns as a belt-and-braces measure.
+compact_after_turns = 0
+# Extra environment for the CLI process, e.g. a proxy:
+# [opencode.env]
+# HTTPS_PROXY = "http://127.0.0.1:3128"
+
+[policy]
+# ── WHO GETS TOOL ACCESS ────────────────────────────────────────────────────
+# Add your own JIDs here (comma separated). Matched case-insensitively and
+# ignoring the /resource part. The admin agent runs with full tool access, so
+# treat this list as shell access to the host.
+owners = ["local@example.org"]
+ignore_jids = []
+
+max_chunk_chars = 3800
+rate_limit_per_minute = 8
+quiet_unknown_senders = false
+# "interrupt" stops the turn in flight and answers the new message next;
+# "queue" lets the turn finish first. Attachments are never interrupted.
+on_new_message = "interrupt"
+# Bump this to give every contact a clean conversation without deleting
+# anything: the derived session id changes for everyone.
+session_id_version = "1"
+# Unit the owner-only "restart" chat command restarts. Empty derives it from
+# OPENCODE_XMPP_INSTANCE (set by the shipped unit) or the JID's local part,
+# e.g. opencode-xmpp-bot.service.
+restart_unit = ""
+
+[repair]
+# Owner-only "repair" chat command. Deterministic diagnostics only: no model,
+# no agent, no token cost.
+# false: try OMEMO if the command arrived encrypted, and fall back to clearly
+# marked plaintext if encryption fails. true: always send the report plaintext.
+plaintext = false
+# Replace contact JIDs with per-report aliases. Disable only for a deliberate
+# owner-only raw report.
+redact_jids = true
+# Window for the logs check.
+log_minutes = 120
+
+[features]
+# OMEMO 0.3 (legacy) and OMEMO 2 / 0.8 are handled by the same plugin.
+omemo = true
+omemo_mode = "auto"
+auto_accept_subscriptions = false
+uploads = true
+upload_service = ""
+max_upload_mb = 40
+# Attach downloaded images to the opencode run (--file) so vision models see
+# them. Other files are only mentioned by path to the admin tier.
+inline_images = true
+max_inline_image_mb = 8
+# The CLI reports completed events, so there is no true mid-turn text to
+# forward. Set this to true for one-line "using <tool>" notices instead.
+interim_messages = false
+max_interim_messages = 3
+spool_dir = "~/.opencode-xmpp/spool"
+omemo_storage = "~/.opencode-xmpp/omemo.json"
+
+[rooms]
+# Rooms to join on startup. An empty join list disables multi-user chat.
+join = []
+nick = "opencode"
+# "mention": only answer when addressed by nick; "always": answer every message.
+respond = "mention"
+# Only used when trust_nicks = true. Nick-only matching is spoofable in
+# anonymous rooms, so real-JID matching (non-anonymous rooms) is the default.
+owner_nicks = []
+trust_nicks = false
+accept_invites = true
+encrypt = false
+plaintext_fallback = false

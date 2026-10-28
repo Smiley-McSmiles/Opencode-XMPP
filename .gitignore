@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+secrets/
+opencode.toml
+.env
+*.log
+dist/
+*.secret
+*.key
+omemo*.json
+spool/

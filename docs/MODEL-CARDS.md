@@ -1,0 +1,270 @@
+# Model cards
+
+A model card bundles everything that makes a model *yours*: a base Ollama model, a
+persona, and the sampling and context settings to run it with. Cards are switched
+per chat with `model <card-id>`, so one bot can be a coding assistant in one
+conversation and a character in another.
+
+- [The format](#the-format)
+- [Where cards live](#where-cards-live)
+- [Fields](#fields)
+- [Examples](#examples)
+- [Switching cards](#switching-cards)
+- [How it is applied](#how-it-is-applied)
+- [Troubleshooting](#troubleshooting)
+
+## The format
+
+The bridge reads **Open WebUI model cards**. That is Open WebUI's own export for a
+model, which looks like this:
+
+```json
+{
+  "id": "gemma-local",
+  "name": "Gemma (Local)",
+  "base_model_id": "gemma4:latest",
+  "params": {
+    "system": "You are {{char}}...",
+    "temperature": 0.7
+  },
+  "meta": { "description": null, "profile_image_url": null }
+}
+```
+
+> **This is not an Ollama format.** Ollama's native JSON is what `ollama show --json`
+> prints (model details, template, parameters), and a Modelfile is text. Neither is
+> read by the bridge. The card is the Open WebUI object above, and the bridge maps its
+> `params` onto an Ollama **request**, which is what Open WebUI does too.
+
+The file may contain one object or an array of objects:
+
+```json
+[ { "id": "a", "base_model_id": "gemma4:latest", "params": {} },
+  { "id": "b", "base_model_id": "qwen3:14b",     "params": {} } ]
+```
+
+Any other JSON in the folder is skipped silently, so an unrelated file cannot break
+startup.
+
+## Where cards live
+
+```
+~/.opencode-xmpp/models/*.json
+```
+
+The folder is fixed (it is not a config setting). Create it and drop files in:
+
+```sh
+mkdir -p ~/.opencode-xmpp/models
+cp examples/models/gemma-local.json ~/.opencode-xmpp/models/
+chmod 600 ~/.opencode-xmpp/models/*.json
+```
+
+Then send `help` from an owner JID; the card list appears at the bottom.
+
+You do **not** need to restart the bridge: cards are read on every `help` and every
+`model` command.
+
+## Fields
+
+### Identity
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `base_model_id` | **yes** | Ollama model to run, e.g. `gemma4:latest` or `ollama/gemma4:latest`. |
+| `id` | yes* | The name you type after `model`. Falls back to `slug` or `name`. |
+| `name` | yes* | Display name in `help`. Falls back to `id`. |
+
+\* At least one of `id`/`name` must exist; the card is skipped otherwise.
+
+`base_model_id` must be a model opencode can see (`opencode models`). If the bridge is
+restricted to the `ollama` provider, only Ollama bases are accepted.
+
+### Persona
+
+| Field | Meaning |
+| --- | --- |
+| `params.system` | System prompt for the chat. |
+| `{{char}}` / `{char}` | Replaced with the card name, minus a trailing parenthetical: `Ada (Local)` → `Ada`. |
+| `{{user}}` / `{user}` | Replaced with the sender's JID local part: `local@example.org` → `local`. |
+
+The persona is sent as a prefix on the user's message for the active card, not
+written into the session. Change the card, change the persona.
+
+### Thinking
+
+| Field | Meaning |
+| --- | --- |
+| `params.think` | `true` or `false`. `false` disables Ollama reasoning for this model. |
+
+Anything other than a JSON boolean is ignored.
+
+### Context
+
+| Field | Meaning |
+| --- | --- |
+| `params.num_ctx` | Context window in tokens. Becomes both `limit.context` (opencode's budget) and `body.options.num_ctx` (what Ollama actually allocates). |
+
+### Sampling and request options
+
+Every key below is copied into `body.options`. Values are coerced to the right type;
+a value that cannot be coerced is skipped instead of failing the card.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `temperature` | float | |
+| `top_p` | float | |
+| `top_k` | int | |
+| `min_p` | float | |
+| `typical_p` | float | |
+| `tfs_z` | float | |
+| `repeat_last_n` | int | |
+| `repeat_penalty` | float | |
+| `presence_penalty` | float | |
+| `frequency_penalty` | float | |
+| `mirostat` | int | `0`, `1` or `2` |
+| `mirostat_tau` | float | |
+| `mirostat_eta` | float | |
+| `num_keep` | int | |
+| `num_predict` | int | Maximum generated tokens |
+| `max_tokens` | int | OpenAI spelling; used as `num_predict` when that is absent |
+| `num_batch` | int | |
+| `seed` | int | |
+| `stop` | string or list of strings | Sent as a list |
+
+Ignored on purpose: everything under `meta` (base64 images, descriptions, tags), and
+Open WebUI-only keys the bridge does not map.
+
+## Examples
+
+### Local assistant
+
+```json
+{
+  "id": "gemma-local",
+  "name": "Gemma (Local)",
+  "base_model_id": "gemma4:latest",
+  "params": {
+    "system": "You are {{char}}, a concise assistant talking to {{user}} over XMPP. Keep replies short.",
+    "think": false,
+    "num_ctx": 32768,
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "top_k": 40,
+    "repeat_penalty": 1.1
+  }
+}
+```
+
+### Character with a bigger window
+
+```json
+{
+  "id": "ada",
+  "name": "Ada (Story)",
+  "base_model_id": "gemma4:26b-64k",
+  "params": {
+    "system": "You are {{char}}. Stay in character with {{user}} at all times.",
+    "num_ctx": 65536,
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 64,
+    "repeat_penalty": 1.05,
+    "max_tokens": 1024
+  }
+}
+```
+
+A ready-to-copy version of the first card is in
+[`examples/models/gemma-local.json`](../examples/models/gemma-local.json).
+
+## Switching cards
+
+From an owner JID, in a direct chat:
+
+```text
+model ada
+```
+
+The reply names the card ID, its display name and the base model. `help` lists every
+card the bridge can see. Matching is exact on `id` or `name` first, then a
+case-insensitive substring, so `model ada` finds `Ada (Story)`.
+
+```text
+model default
+```
+
+resets the chat to `[admin] model`.
+
+Model and card selections are **per chat** and are forgotten when the bridge
+restarts. Each selection also gets its own OpenCode session, so switching models does
+not try to continue a context created for another model.
+
+## How it is applied
+
+When you select a card, the bridge updates the opencode config of the user running
+the bridge (`~/.config/opencode/opencode.jsonc`, or `opencode.json` if that exists):
+
+```jsonc
+{
+  "providers": {
+    "ollama": {
+      "models": {
+        "gemma4:latest": {
+          "limit": { "context": 32768 },
+          "capabilities": { "reasoning": { "supported": false } },
+          "body": {
+            "think": false,
+            "options": {
+              "num_ctx": 32768,
+              "temperature": 0.7,
+              "top_p": 0.9,
+              "top_k": 40,
+              "repeat_penalty": 1.1
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Things to know:
+
+- **The file must exist.** If neither `opencode.jsonc` nor `opencode.json` is present,
+  the card's persona and model still apply, but there is nowhere to write the model
+  options. Create an empty one:
+
+  ```sh
+  mkdir -p ~/.config/opencode
+  printf '{"$schema": "https://opencode.ai/config.json"}\n' \
+      > ~/.config/opencode/opencode.jsonc
+  ```
+
+- **The file is rewritten as plain JSON.** Comments (`//`, `/* */`) are understood
+  when reading, so a commented file does not break selection, but they are not
+  preserved. Keep a copy if you care about them.
+- **Settings are global to that model ID.** Two cards on the same base model share
+  one entry; the last card selected wins for the shared options.
+- **Only the model entry is touched.** Other providers and settings are kept.
+
+## Troubleshooting
+
+**The card does not appear in `help`.**
+Check that it is a `.json` file directly in `~/.opencode-xmpp/models/`, that it has
+`base_model_id` and `id`/`name`, and that the base model is visible in
+`opencode models`. A card whose base is not an allowed provider is hidden.
+
+**`model <id>` says "Unknown model".**
+If no card matches, the argument is looked up as a model. Use the exact card ID from
+`help`; `help` prints `id — name` followed by `base: ollama/...`.
+
+**"I couldn't apply the card settings".**
+The config file is not valid JSON, or is not writable by the bridge user. The reply
+includes the parse error; fix the file and try again.
+
+**The context did not change.**
+`params.num_ctx` only takes effect when the *card* is selected. `model ollama/gemma4:latest`
+selects the model directly and uses the model's own `num_ctx`. Also confirm you edited the config of the user the bridge runs as, not
+your desktop user's.
