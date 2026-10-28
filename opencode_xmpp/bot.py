@@ -198,9 +198,14 @@ class Bridge(slixmpp.ClientXMPP):
         self._chats: dict[str, _Chat] = {}
         self._stopped = asyncio.Event()
         self._upload_host: str = ""
-        # ``default.json`` is the card every chat starts with. None means the
-        # bridge falls back to [admin]/[guest] model, as before.
-        self._default_card: cards.Card | None = cards.load_default()
+        # Role-specific default cards: models/admin/default.json and
+        # models/guest/default.json, each falling back to models/default.json.
+        self._default_cards: dict[str, cards.Card | None] = {
+            "admin": cards.load_default_for("admin"),
+            "guest": cards.load_default_for("guest"),
+        }
+        # Cards already written into opencode's config this process.
+        self._applied_cards: set[tuple[str, str]] = set()
         _instance = bare_jid(cfg.account.jid).split('@', 1)[0]
         self._pending = approvals.PendingStore(
             Path(cfg.features.omemo_storage).expanduser().with_name(f"pending-{_instance}.json"))
@@ -269,20 +274,11 @@ class Bridge(slixmpp.ClientXMPP):
 
     async def _after_start(self) -> None:
         # A card's context and sampling options live in opencode's config, so the
-        # default card has to be applied once before the first turn.
-        if self._default_card is not None:
-            path = self._opencode_config_path()
-            if path.is_file():
-                try:
-                    changed = await asyncio.to_thread(
-                        self._apply_card_config, path, self._default_card)
-                except (OSError, ValueError) as exc:
-                    log.warning("could not apply default card %s: %s",
-                                self._default_card.id, exc)
-                else:
-                    if changed:
-                        log.info("applied default card %s (%s) to %s",
-                                 self._default_card.id, self._default_card.base_model, path)
+        # admin default card is applied once before the first turn. Guest
+        # defaults are applied on the first guest turn (they may differ).
+        card = self._default_cards.get("admin")
+        if card is not None:
+            await self._ensure_card_applied(card)
         # Advertise presence to every contact that is subscribed to us; without a
         # direct presence after a fresh approval, clients can keep showing "offline".
         try:
@@ -629,20 +625,27 @@ class Bridge(slixmpp.ClientXMPP):
         text = (body or "").strip()
         item = {"body": text, "encrypted": encrypted, "room": room,
                 "nick": nick, "tier": tier, "real_jid": real_jid, "id": msg_id}
-        if room is None and tier is None and approvals.clear_command(text):
-            asyncio.create_task(self._handle_clear(key, item))
-            return
-        if room is None and tier is None and tier_for(key, self.cfg.policy.owners) == OWNER:
-            think = approvals.think_command(text)
-            if think is not None:
-                asyncio.create_task(self._handle_think(key, item, think))
+        if room is None and tier is None:
+            sender_tier = tier_for(key, self.cfg.policy.owners)
+            if approvals.clear_command(text):
+                asyncio.create_task(self._handle_clear(key, item))
                 return
+            # Everyone may see their own card menu and pick from the cards their
+            # tier is allowed to use; the guest agent still enforces read-only.
             if approvals.help_command(text):
                 asyncio.create_task(self._handle_help(key, item))
                 return
             model_arg = approvals.model_command(text)
             if model_arg is not None:
                 asyncio.create_task(self._handle_model(key, item, model_arg))
+                return
+            if sender_tier != OWNER:
+                chat = self._chats.setdefault(key, _Chat())
+                self._queue_turn(key, chat, item)
+                return
+            think = approvals.think_command(text)
+            if think is not None:
+                asyncio.create_task(self._handle_think(key, item, think))
                 return
             if approvals.restart_command(text):
                 asyncio.create_task(self._handle_restart(key, item))
@@ -664,12 +667,16 @@ class Bridge(slixmpp.ClientXMPP):
                 asyncio.create_task(self._handle_join(key, item, key, room_to_join))
                 return
         chat = self._chats.setdefault(key, _Chat())
+        self._queue_turn(key, chat, item)
+
+    def _queue_turn(self, key: str, chat: _Chat, item: dict) -> None:
+        """Queue a non-command message for this chat's runner."""
         if chat.clearing:
             # Hold anything that arrives during a hard clear; it must use the
             # new session, which only exists once the delete has finished.
             chat.pending.append(item)
             return
-        if _is_stop_command(text):
+        if _is_stop_command(item["body"]):
             self._stop_chat(key, chat, item)
             return
         chat.pending.append(item)
@@ -888,7 +895,7 @@ class Bridge(slixmpp.ClientXMPP):
     async def _handle_think(self, key: str, item: dict, state: str) -> None:
         """Owner said ``think-off``/``think-on``: save it to the active card."""
         chat = self._chats.setdefault(key, _Chat())
-        card = self._active_card(chat)
+        card = self._active_card(chat, OWNER)
         if card is None:
             await self._reply(
                 key, item,
@@ -904,10 +911,11 @@ class Bridge(slixmpp.ClientXMPP):
             return
         chat.card = updated
         chat.model_override = updated.model
-        if (self._default_card is not None
-                and updated.id == self._default_card.id
-                and updated.source == self._default_card.source):
-            self._default_card = updated
+        for role, default in self._default_cards.items():
+            if (default is not None and updated.id == default.id
+                    and updated.source == default.source):
+                self._default_cards[role] = updated
+        self._applied_cards.add((str(updated.source), updated.id))
         path = self._opencode_config_path()
         if path.is_file():
             try:
@@ -937,10 +945,11 @@ class Bridge(slixmpp.ClientXMPP):
             model = (model or "").strip()
             if "/" in model:
                 return model.split("/", 1)[0].strip().lower()
-        # A card-only deployment has no [admin] model; the default card then
-        # decides which provider this bridge is allowed to use.
-        if self._default_card is not None and "/" in self._default_card.model:
-            return self._default_card.model.split("/", 1)[0].strip().lower()
+        # A card-only deployment has no [admin] model; the default cards then
+        # decide which provider this bridge is allowed to use.
+        for card in self._default_cards.values():
+            if card is not None and "/" in card.model:
+                return card.model.split("/", 1)[0].strip().lower()
         return ""
 
     def _model_allowed(self, model: str) -> bool:
@@ -967,22 +976,45 @@ class Bridge(slixmpp.ClientXMPP):
 
     # -- model cards --------------------------------------------------------
 
-    def _active_card(self, chat: _Chat) -> cards.Card | None:
-        """The card this chat uses: an explicit choice, else ``default.json``."""
-        return chat.card if chat.card is not None else self._default_card
+    def _default_card_for(self, tier: str) -> cards.Card | None:
+        """The default card for a trust tier (guest/ or root default)."""
+        return self._default_cards.get("guest" if tier == GUEST else "admin")
+
+    def _active_card(self, chat: _Chat, tier: str) -> cards.Card | None:
+        """The card this chat uses: an explicit choice, else the tier's default."""
+        return chat.card if chat.card is not None else self._default_card_for(tier)
 
     def _active_model(self, chat: _Chat, tier: str) -> str:
         """The opencode model id for this chat, before any per-chat override."""
         if chat.model_override:
             return chat.model_override
-        card = self._active_card(chat)
+        card = self._active_card(chat, tier)
         if card is not None:
             return card.model
         return self.cfg.admin.model if tier == OWNER else self.cfg.guest.model
 
-    def _reload_default_card(self) -> cards.Card | None:
-        self._default_card = cards.load_default()
-        return self._default_card
+    def _reload_default_card(self, tier: str) -> cards.Card | None:
+        # Reload both roles: they may share the root default card.
+        self._default_cards["admin"] = cards.load_default_for("admin")
+        self._default_cards["guest"] = cards.load_default_for("guest")
+        return self._default_card_for(tier)
+
+    async def _ensure_card_applied(self, card: cards.Card) -> None:
+        """Write a card's options into opencode's config once per process."""
+        key = (str(card.source), card.id)
+        if key in self._applied_cards:
+            return
+        path = self._opencode_config_path()
+        if not path.is_file():
+            return
+        try:
+            changed = await asyncio.to_thread(self._apply_card_config, path, card)
+        except (OSError, ValueError) as exc:
+            log.warning("could not apply card %s: %s", card.id, exc)
+            return
+        self._applied_cards.add(key)
+        if changed:
+            log.info("applied card %s (%s) to %s", card.id, card.model, path)
 
     async def _select_card(self, key: str, item: dict, chat: _Chat,
                            card: cards.Card) -> None:
@@ -1000,45 +1032,49 @@ class Bridge(slixmpp.ClientXMPP):
                 chat.model_override, chat.card = old_model, old_card
                 await self._reply(key, item, f"I couldn't apply the card settings: {exc}")
                 return
-        log.info("owner %s selected model card %s (%s)", key, card.id, card.model)
+            self._applied_cards.add((str(card.source), card.id))
+        log.info("%s selected model card %s (%s)", key, card.id, card.model)
         await self._reply(
             key, item,
-            f"Model switched to card {card.name} via {card.id} for this chat "
-            f"(base: {card.base_model}). Its persona and model parameters apply "
-            "on the next turn; model default goes back to default.json.")
+            f"Model switched to card {card.name} ({card.id}) for this chat. "
+            "Its persona and model parameters apply on the next turn; model default "
+            "goes back to the default card.")
 
     async def _handle_help(self, key: str, item: dict) -> None:
-        """Owner said ``help``: commands, current card and the card list."""
+        """Commands, the current card and the cards this sender may use."""
         chat = self._chats.get(key) or _Chat()
-        card = self._active_card(chat)
-        current = self._active_model(chat, OWNER) or "(default)"
+        tier = tier_for(key, self.cfg.policy.owners)
+        role = "guest" if tier == GUEST else "admin"
+        card = self._active_card(chat, tier)
+        current = self._active_model(chat, tier) or "(default)"
         if card is not None:
             current += f" (card: {card.name})"
-        lines = [
-            "Commands (owner):",
-            "  stop",
-            "  help",
-            "  model <card-id>",
-            "  model default",
-            "  think-off / think-on  (saved to the active card)",
-            "  restart",
-            "  repair [focus]",
-            "  clear",
-            "  invite <jid>",
-            "  join <room@conference.host>",
-            "  approve <jid> / deny <jid> / pending",
-            "",
-            f"Current chat model: {current}",
-        ]
-        card_dir = cards.default_dir()
-        lines.extend(["", f"Cards ({card_dir}):"])
+        lines = [f"Commands ({role}):", "  stop", "  help",
+                 "  model <card-id>", "  model default"]
+        if tier == OWNER:
+            lines += [
+                "  think-off / think-on  (saved to the active card)",
+                "  restart",
+                "  repair [focus]",
+            ]
+        lines.append("  clear")
+        if tier == OWNER:
+            lines += [
+                "  invite <jid>",
+                "  join <room@conference.host>",
+                "  approve <jid> / deny <jid> / pending",
+            ]
+        lines += ["", f"Current chat model: {current}"]
+
+        folder = cards.default_dir() if tier == OWNER else cards.default_dir() / "guest"
+        lines.extend(["", f"Cards ({folder}):"])
         try:
-            found = [entry for entry in cards.load_cards(card_dir)
+            found = [entry for entry in cards.cards_for_role(role)
                      if self._model_allowed(entry.base_model)]
         except OSError as exc:
             lines.append(f"  (unreadable: {exc})")
         else:
-            default = self._default_card
+            default = self._default_card_for(tier)
             if found:
                 for entry in found:
                     is_default = (default is not None
@@ -1046,15 +1082,17 @@ class Bridge(slixmpp.ClientXMPP):
                                   and entry.source == default.source)
                     lines.append(f"  {entry.id} — {entry.name}"
                                  + ("  [default]" if is_default else ""))
-                    lines.append(f"      base: {entry.base_model}")
                 lines.append("  select a card with: model <card-id>")
             else:
-                lines.append(f"  (none — add {cards.DEFAULT_NAME} or any card to that directory)")
+                lines.append(f"  (none — add any card to {folder})")
         await self._reply(key, item, "\n".join(lines))
 
     async def _handle_model(self, key: str, item: dict, argument: str) -> None:
-        """Owner said ``model``: pick one of the model cards."""
+        """``model``: pick one of the cards this sender may use."""
         chat = self._chats.setdefault(key, _Chat())
+        tier = tier_for(key, self.cfg.policy.owners)
+        role = "guest" if tier == GUEST else "admin"
+        folder = cards.default_dir() if tier == OWNER else cards.default_dir() / "guest"
         argument = argument.strip()
         if not argument:
             await self._reply(
@@ -1062,14 +1100,15 @@ class Bridge(slixmpp.ClientXMPP):
                 "Usage: model <card-id> or model default. Send help to list the cards.")
             return
         if argument.lower() in ("default", "reset", "off"):
-            card = self._reload_default_card()
+            card = self._reload_default_card(tier)
             if card is None:
                 chat.model_override, chat.card = "", None
-                fallback = (self.cfg.admin.model or "(the bridge default)")
+                fallback = ((self.cfg.admin.model if tier == OWNER else self.cfg.guest.model)
+                            or "(the bridge default)")
                 await self._reply(
                     key, item,
-                    f"There is no {cards.DEFAULT_NAME} in {cards.default_dir()}, so this "
-                    f"chat now uses {fallback}. Add a default.json to make it explicit.")
+                    f"There is no default card in {folder} or {cards.default_dir()}, so "
+                    f"this chat now uses {fallback}. Add a default.json to make it explicit.")
                 return
             if not self._model_allowed(card.base_model):
                 await self._reply(
@@ -1080,7 +1119,7 @@ class Bridge(slixmpp.ClientXMPP):
             await self._select_card(key, item, chat, card)
             return
 
-        card = cards.find_card(cards.load_cards(cards.default_dir()), argument)
+        card = cards.find_card(cards.cards_for_role(role), argument)
         if card is None:
             hint = ""
             if "/" in argument or ":" in argument:
@@ -1090,7 +1129,7 @@ class Bridge(slixmpp.ClientXMPP):
             await self._reply(
                 key, item,
                 f"No card matches {argument!r}. Models are chosen through cards in "
-                f"{cards.default_dir()}.{hint} Send help to list them.")
+                f"{folder}.{hint} Send help to list them.")
             return
         if not self._model_allowed(card.base_model):
             await self._reply(
@@ -1128,7 +1167,7 @@ class Bridge(slixmpp.ClientXMPP):
                     return
             tier = tier_for(key, self.cfg.policy.owners)
             settings = _settings_for(self.cfg, self.cfg.admin if tier == OWNER else self.cfg.guest)
-            card = self._active_card(chat)
+            card = self._active_card(chat, tier)
             default_model = (card.model if card is not None
                              else (self.cfg.admin.model if tier == OWNER else self.cfg.guest.model))
             models = {default_model, self.cfg.admin.model, self.cfg.guest.model,
@@ -1260,7 +1299,7 @@ class Bridge(slixmpp.ClientXMPP):
         after a switch makes the CLI report "model is not available"; a scope
         keeps each model's transcript separate and starts cleanly.
         """
-        card = self._active_card(chat)
+        card = self._active_card(chat, tier)
         model = self._active_model(chat, tier)
         return self._scoped_session_id(key, model, card.id if card else "")
 
@@ -1280,8 +1319,9 @@ class Bridge(slixmpp.ClientXMPP):
         who = f"{item.get('nick')} in the group chat {room}" if room else sender
         preamble = _turn_preamble(self.cfg, who, room)
         body = preamble + item["body"]
-        card = self._active_card(chat)
+        card = self._active_card(chat, tier)
         if card is not None:
+            await self._ensure_card_applied(card)
             card_system = cards.render_system(card, sender)
             if card_system:
                 body = (preamble + f"[Active model card: {card.name}]\n"

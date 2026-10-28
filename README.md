@@ -99,12 +99,17 @@ advertising `audio`; see [docs/OLLAMA.md](docs/OLLAMA.md).
 
 **Cards are the model menu.** Drop an Open WebUI export (`*.json`) in
 `~/.opencode-xmpp/models/` and switch with `model my-card`. `help` lists **only your
-cards**, never every model Ollama happens to have. The card's persona applies to your
-chat, and its `num_ctx`, `temperature`, `top_p`, `top_k`, `repeat_penalty`, `seed` and
-friends are written into the Ollama model's request options — so the card, not the
-base model's Modelfile, decides the context window. `default.json` is the card every
-chat starts with and what `model default` loads. See
-[docs/MODEL-CARDS.md](docs/MODEL-CARDS.md).
+cards** — an id and a name, never every model Ollama happens to have and never a base
+model path. The card's persona applies to your chat, and its `num_ctx`, `temperature`,
+`top_p`, `top_k`, `repeat_penalty`, `seed` and friends are written into the Ollama
+model's request options — so the card, not the base model's Modelfile, decides the
+context window. `default.json` is the card every chat starts with and what
+`model default` loads. See [docs/MODEL-CARDS.md](docs/MODEL-CARDS.md).
+
+**Separate card shelves for owners and guests.** `models/admin/` and `models/guest/`
+hold role-specific cards; the root holds shared/legacy cards. Admins see everything,
+guests see and can select only `models/guest/` — so an adult or heavy card stays out of
+a guest's `help` menu.
 
 **Group chats (MUC)** that answer when addressed by nick, or to every message.
 Encrypted rooms use OMEMO 2 over the XEP-0420 stanza-content envelope; the bridge
@@ -255,9 +260,9 @@ cost a turn. Full reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 | Command | Who | What it does |
 | --- | --- | --- |
 | `stop` | anyone | Interrupt the answer in progress (`Stopped.`) without a new question |
-| `help` / `?` | owner, DM | Commands, current card and the available model cards |
-| `model <card-id>` | owner, DM | Switch this chat to a model card |
-| `model default` | owner, DM | Load `default.json` for this chat |
+| `help` / `?` | anyone, DM | Commands, current card and the cards your tier may use |
+| `model <card-id>` | anyone, DM | Switch this chat to a card (guests: guest cards only) |
+| `model default` | anyone, DM | Load the role's `default.json` for this chat |
 | `think-off` / `think-on` | owner, DM | Save the reasoning toggle to the active card's JSON |
 | `clear` | anyone, DM | Stop the turn and delete every known OpenCode session for this contact |
 | `restart` | owner, DM | Acknowledge, then restart this bridge's systemd unit |
@@ -287,7 +292,7 @@ opencode_xmpp/approvals.py    contact requests and owner commands
 opencode_xmpp/diagnostics.py  the model-free `repair` report
 opencode_xmpp/__main__.py     CLI: run | check | init | unit | react | handoff
 agents/                       xmpp-admin, xmpp-chat, xmpp-guest, xmpp-ops
-examples/models/              a copyable model card
+examples/models/              copyable cards (default + persona)
 docs/                         how-to guides
 ```
 
@@ -298,7 +303,7 @@ opencode.toml          bot JID, owners, agents, limits
 secrets/account.secret XMPP password, 0600, git-ignored
 omemo.json             OMEMO identity and sessions — back this up
 spool/                 per-contact attachment spool, emptied after each turn
-models/                your model cards; default.json is the default card
+models/                cards: default.json, admin/, guest/
 venv/                  the bridge's own virtualenv
 ```
 
@@ -323,7 +328,8 @@ every setting.
   agent with shell access. Anyone who can send as that JID can run commands.
 - **Guests are guests.** They run `xmpp-guest`, whose permission rules deny `execute`,
   `edit`, `subagent` and `skill`. It can read files in the bot's workspace, so give the
-  bot a dedicated Unix user with nothing to leak.
+  bot a dedicated Unix user with nothing to leak. Guests may pick a card from
+  `models/guest/`, but cannot see or select root/admin cards.
 - **The bridge does not store transcripts.** It derives session ids; OpenCode owns the
   sessions. Message text is never written to the log — only lengths and JIDs.
 - **Secrets are files, 0600, never in git.** `secrets/account.secret` is the XMPP

@@ -34,6 +34,11 @@ Treat the list like an SSH `authorized_keys`:
 Guests run `xmpp-guest`, whose rules deny `execute`, `edit`, `subagent` and `skill`.
 That is enforced by opencode, not by the prompt.
 
+Guests can call `help` and `model`, but only over the `models/guest/` shelf: they
+cannot see or select a root or `models/admin/` card. A card's request options are
+written into the shared opencode config, so treat `models/guest/` as admin-authored
+configuration — a guest picks among your cards, they do not author them.
+
 ## Give the bot its own user
 
 The single most effective control. The admin agent is *supposed* to have the user's

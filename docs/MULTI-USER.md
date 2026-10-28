@@ -23,10 +23,23 @@ JIDs are compared in bare, case-folded form, so `local@example.org/phone` and
 | May run commands | yes | no |
 | May use subagents | no (by agent rule) | no (by agent rule) |
 | Default timeout | 600 s | 180 s |
-| Bridge commands | all | `stop`, `clear` |
+| Bridge commands | all | `stop`, `help`, `model`, `clear` |
 
 The tier is not a prompt. It selects a different agent, and the agent's permission
 rules are enforced by opencode. A guest cannot talk its way into a shell command.
+
+Guests can still choose **which card answers them**, but only from the guest shelf:
+
+```
+~/.opencode-xmpp/models/
+├── *.json            root cards — owner only
+├── admin/*.json      owner only
+└── guest/*.json      visible and selectable by guests
+```
+
+`help` for a guest lists only `guest/`; `model <id>` refuses an admin card even if the
+id is known. Guest defaults are `models/guest/default.json`, falling back to
+`models/default.json`. See [MODEL-CARDS.md](MODEL-CARDS.md).
 
 The shipped agents live in [`agents/`](../agents); the installer copies them to
 `~/.config/opencode/agents/`. Edit them there if you want different rules — just

@@ -49,34 +49,64 @@ startup.
 
 ## Where cards live
 
+The folder is fixed (it is not a config setting):
+
 ```
-~/.opencode-xmpp/models/*.json
+~/.opencode-xmpp/models/
+├── default.json          fallback default for both tiers
+├── *.json                root cards — admin only (legacy layout)
+├── admin/
+│   ├── default.json      admin default (overrides the root one)
+│   └── *.json            admin-only cards
+└── guest/
+    ├── default.json      guest default (overrides the root one)
+    └── *.json            cards guests may see and select
 ```
 
-The folder is fixed (it is not a config setting). Create it and drop files in:
+Who sees what:
+
+| | root | `admin/` | `guest/` |
+| --- | --- | --- | --- |
+| Owner `help` / `model` | yes | yes | yes |
+| Guest `help` / `model` | no | no | yes |
+
+A guest never sees an admin card in `help` and cannot select one by guessing its id —
+selection is restricted to the same list.
+
+Create the layout and drop files in:
 
 ```sh
-mkdir -p ~/.opencode-xmpp/models
-cp examples/models/default.json ~/.opencode-xmpp/models/default.json
-cp examples/models/gemma-local.json ~/.opencode-xmpp/models/
+mkdir -p ~/.opencode-xmpp/models/admin ~/.opencode-xmpp/models/guest
+cp examples/models/default.json    ~/.opencode-xmpp/models/default.json
+cp examples/models/gemma-local.json ~/.opencode-xmpp/models/admin/
+cp my-guest-card.json              ~/.opencode-xmpp/models/guest/
 chmod 600 ~/.opencode-xmpp/models/*.json
+chmod 700 ~/.opencode-xmpp/models/admin ~/.opencode-xmpp/models/guest
 ```
 
-Then send `help` from an owner JID; the card list appears at the bottom.
+Then send `help` in a direct chat; the card list appears at the bottom, with just the
+id and name (no base model).
 
 You do **not** need to restart the bridge: cards are read on every `help` and every
 `model` command.
 
 ## The default card
 
-`~/.opencode-xmpp/models/default.json` is special:
+Defaults are per tier, checked in this order:
 
-- every chat that has not selected another card starts with it;
-- `model default` loads it;
-- `help` marks it `[default]`;
-- `think-off` / `think-on` edit it when no other card is active.
+| Sender | First | Fallback |
+| --- | --- | --- |
+| Owner | `models/admin/default.json` | `models/default.json` |
+| Guest | `models/guest/default.json` | `models/default.json` |
 
-It uses the same format as any card. A minimal one:
+The default card:
+
+- is what every chat of that tier starts with;
+- is what `model default` loads;
+- is marked `[default]` in that tier's `help`;
+- is what `think-off` / `think-on` edit when the owner has not selected another card.
+
+It uses the same format as any card. A minimal root default:
 
 ```json
 {
@@ -91,15 +121,15 @@ It uses the same format as any card. A minimal one:
 }
 ```
 
-If `default.json` is missing, chats fall back to `[admin] model` (or `[guest] model`
-for guests). `model default` then clears the selection and reports which model is being
-used instead.
+If there is no default card at all, chats fall back to `[admin] model` (or `[guest]
+model`) and `model default` reports which model is used instead.
 
-The default card is also the last word on the provider restriction when `[admin] model`
-is empty: a `default.json` whose base is `ollama/...` keeps the bridge on Ollama cards.
+The default cards also decide the provider restriction when `[admin] model` is empty:
+an `ollama/...` default keeps the bridge on Ollama cards.
 
-Add or edit `default.json` at any time. The bridge applies it at startup and whenever
-`model default` is sent; restart the bridge after editing it to apply it to every chat.
+The root default is applied at startup; a role default is applied on that tier's first
+turn. After editing a default card, send `model default` (or restart) to apply it to
+existing chats.
 
 ## Fields
 
@@ -317,9 +347,9 @@ Check that it is a `.json` file directly in `~/.opencode-xmpp/models/`, that it 
 
 **`model <id>` says "No card matches".**
 Selection is card-only; a raw model name (`ollama/gemma4:latest`) is not accepted.
-Use the exact card ID from `help`; `help` prints `id — name` followed by
-`base: ollama/...`. To run a model that has no card, add one with that
-`base_model_id`.
+Use the exact card ID from `help`, which prints `id — name`. Guests only see the
+`guest/` shelf, so an admin card is "no match" for them. To run a model that has no
+card, add one with that `base_model_id` in the right folder.
 
 **"I couldn't apply the card settings".**
 The config file is not valid JSON, or is not writable by the bridge user. The reply

@@ -183,8 +183,9 @@ Notes:
   (the first `/` segment, e.g. `ollama`) — or the provider of `default.json` — is the
   only one `help` lists and `model` accepts.
 - Models are selected through cards in `~/.opencode-xmpp/models/`; `default.json` is
-  the card every chat starts with and the one `model default` loads. See
-  [MODEL-CARDS.md](MODEL-CARDS.md).
+  the card every chat starts with and the one `model default` loads. Role-specific
+  cards go in `models/admin/` and `models/guest/` (guests see only the guest shelf).
+  See [MODEL-CARDS.md](MODEL-CARDS.md).
 - `[policy] owners` is an **access-control list for shell access**. Matching ignores
   case and the `/resource` part, so `local@example.org/phone` counts as
   `local@example.org`.

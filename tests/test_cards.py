@@ -74,18 +74,22 @@ def _fake_bridge(tmp_path, cards_dir, config, card=None):
 
     fake = SimpleNamespace(
         _chats={},
-        _default_card=card,
+        _default_cards={"admin": card, "guest": card},
+        _applied_cards=set(),
         cfg=SimpleNamespace(
             admin=SimpleNamespace(model="ollama/gemma4:latest"),
             guest=SimpleNamespace(model=""),
+            policy=SimpleNamespace(owners=("local@example.org",)),
         ),
         _reply=fake_reply,
         _model_allowed=lambda model: True,
         _allowed_provider=lambda: "ollama",
         _opencode_config_path=lambda: config,
-        _reload_default_card=lambda: cards.load_default(cards_dir),
+        _reload_default_card=lambda tier: cards.load_default_for(
+            "guest" if tier == "guest" else "admin", cards_dir),
     )
-    for name in ("_active_card", "_active_model", "_select_card"):
+    for name in ("_active_card", "_active_model", "_select_card",
+                 "_default_card_for", "_ensure_card_applied"):
         setattr(fake, name, MethodType(getattr(botmod.Bridge, name), fake))
     # A staticmethod: call it with (path, card), never with self.
     fake._apply_card_config = botmod.Bridge._apply_card_config
@@ -109,7 +113,8 @@ def test_help_lists_cards_not_every_model(tmp_path, monkeypatch):
     assert "gemma-default — Gemma (Default)  [default]" in text
     assert "ada — Ada" in text
     assert "Models:" not in text
-    # The only mention of the model is the current card / its base, never a list.
+    assert "base:" not in text
+    # The only mention of the model is the current card, never a list.
     assert "  ollama/gemma4:latest\n" not in text
 
 
@@ -146,7 +151,7 @@ def test_model_default_selects_default_json(tmp_path, monkeypatch):
         tmp_path, tmp_path, tmp_path / "missing.jsonc", card=cards.load_default(tmp_path))
 
     asyncio.run(botmod.Bridge._handle_model(fake, "local@example.org", {}, "default"))
-    assert fake._default_card.id == "gemma-default"
+    assert fake._default_cards["admin"].id == "gemma-default"
     assert fake._chats["local@example.org"].card.id == "gemma-default"
     assert "card Gemma (Default)" in replies[-1]
 
@@ -220,3 +225,76 @@ def test_open_webui_base_model_export_uses_its_id(tmp_path):
     assert saved["meta"]["description"] == "Reasoning Model"
     assert saved["is_active"] is True
 
+
+
+def test_role_folders_split_guest_and_admin_cards(tmp_path, monkeypatch):
+    monkeypatch.setattr(cards, "default_dir", lambda: tmp_path)
+    (tmp_path / "admin").mkdir()
+    (tmp_path / "guest").mkdir()
+    _write(tmp_path / "root.json", {
+        "id": "root", "name": "Root", "base_model_id": "gemma4:latest"})
+    _write(tmp_path / "admin" / "admin-card.json", {
+        "id": "admin-card", "name": "Admin Card", "base_model_id": "acme/x:latest"})
+    _write(tmp_path / "guest" / "helper.json", {
+        "id": "helper", "name": "Helper", "base_model_id": "gemma3:1b"})
+
+    assert [card.id for card in cards.cards_for_role("guest")] == ["helper"]
+    # Admin sees shared root cards, admin cards and guest cards.
+    assert [card.id for card in cards.cards_for_role("admin")] == [
+        "root", "admin-card", "helper"]
+
+
+def test_role_defaults_fall_back_to_the_root_card(tmp_path):
+    _write(tmp_path / "default.json", {
+        "id": "shared", "name": "Shared", "base_model_id": "gemma4:latest"})
+    (tmp_path / "admin").mkdir()
+    (tmp_path / "guest").mkdir()
+    _write(tmp_path / "admin" / "default.json", {
+        "id": "admin-default", "name": "Admin", "base_model_id": "gemma4:latest"})
+
+    assert cards.load_default_for("admin", tmp_path).id == "admin-default"
+    assert cards.load_default_for("guest", tmp_path).id == "shared"
+
+
+def test_guest_help_lists_only_guest_cards(tmp_path, monkeypatch):
+    monkeypatch.setattr(cards, "default_dir", lambda: tmp_path)
+    (tmp_path / "admin").mkdir()
+    (tmp_path / "guest").mkdir()
+    _write(tmp_path / "default.json", {
+        "id": "shared", "name": "Shared", "base_model_id": "gemma4:latest"})
+    _write(tmp_path / "admin" / "admin-card.json", {
+        "id": "admin-card", "name": "Admin Card", "base_model_id": "acme/x:latest"})
+    _write(tmp_path / "guest" / "helper.json", {
+        "id": "helper", "name": "Helper", "base_model_id": "gemma3:1b"})
+
+    fake, replies = _fake_bridge(tmp_path, tmp_path, tmp_path / "missing.jsonc")
+    fake._default_cards = {"admin": cards.load_default_for("admin", tmp_path),
+                           "guest": cards.load_default_for("guest", tmp_path)}
+    asyncio.run(botmod.Bridge._handle_help(fake, "remote@example.org", {}))
+
+    text = replies[-1]
+    assert "Commands (guest):" in text
+    assert "helper — Helper" in text
+    assert "admin-card" not in text
+    assert "think-off" not in text
+    assert "restart" not in text
+    assert "base:" not in text
+
+
+def test_guest_can_only_select_guest_cards(tmp_path, monkeypatch):
+    monkeypatch.setattr(cards, "default_dir", lambda: tmp_path)
+    (tmp_path / "admin").mkdir()
+    (tmp_path / "guest").mkdir()
+    _write(tmp_path / "admin" / "admin-card.json", {
+        "id": "admin-card", "name": "Admin Card", "base_model_id": "acme/x:latest"})
+    _write(tmp_path / "guest" / "helper.json", {
+        "id": "helper", "name": "Helper", "base_model_id": "gemma3:1b"})
+
+    fake, replies = _fake_bridge(tmp_path, tmp_path, tmp_path / "missing.jsonc")
+    asyncio.run(botmod.Bridge._handle_model(fake, "remote@example.org", {}, "admin-card"))
+    assert "No card matches" in replies[-1]
+    assert fake._chats["remote@example.org"].card is None
+
+    asyncio.run(botmod.Bridge._handle_model(fake, "remote@example.org", {}, "helper"))
+    assert fake._chats["remote@example.org"].card.id == "helper"
+    assert fake._chats["remote@example.org"].model_override == "ollama/gemma3:1b"

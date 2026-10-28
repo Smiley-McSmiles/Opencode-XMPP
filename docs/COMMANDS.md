@@ -7,8 +7,8 @@ broken.
 | Command | Who | Where | What it does |
 | --- | --- | --- | --- |
 | [`stop`](#stop) | anyone | DM | Interrupt the current answer |
-| [`help`](#help) | owner | DM | Commands, current card, available cards |
-| [`model`](#model) | owner | DM | Switch this chat to a model card |
+| [`help`](#help) | anyone | DM | Commands, current card, cards your tier may use |
+| [`model`](#model) | anyone | DM | Switch this chat to a card (guests: guest cards) |
 | [`think-off` / `think-on`](#thinking) | owner | DM | Save reasoning on/off in the active card |
 | [`clear`](#clear) | anyone | DM | Delete this contact's OpenCode sessions |
 | [`repair`](#repair) | owner | DM | Model-free diagnostics |
@@ -40,39 +40,54 @@ first. A turn that carries a photo or voice note is never interrupted.
 
 ## help
 
-Owner only. Lists:
+Available to everyone in a direct chat, with a role-specific menu:
 
-- every command,
-- the card (and base model) active in this chat,
-- the model cards in `~/.opencode-xmpp/models/`, with their base model.
+- every command that role may use,
+- the active card,
+- the cards that role may select, as `id — name` only.
 
-`help` lists **cards only** — it never dumps every model Ollama has. The default card is
-marked `[default]`. If the bridge is restricted to a provider (from `[admin] model` or
-`default.json`), cards on other providers are hidden.
+`help` lists **cards only** — it never dumps every model Ollama has, and it never
+prints a base model path. The tier's default card is marked `[default]`.
 
-If you have no cards yet, the list says so and points at the folder.
+| | Sees |
+| --- | --- |
+| Owner | root cards, `models/admin/` and `models/guest/` |
+| Guest | `models/guest/` only |
+
+If the bridge is restricted to a provider (from `[admin] model` or a default card),
+cards on other providers are hidden too. If a role has no cards, the reply says so and
+points at that role's folder.
 
 ## model
 
 ```text
-model <card-id>     # switch this chat to a model card
-model default       # load default.json
+model <card-id>     # switch this chat to a card you may use
+model default       # load your tier's default card
 ```
 
-Selection is **card-only**. Matching is exact on `id` or `name`, then a case-insensitive
-substring, so `model ada` finds `Ada (Story)`. A raw model name such as
-`ollama/gemma4:latest` is rejected with a hint to add a card whose `base_model_id` is
-that model — the card is where the context and sampling settings live.
+Selection is **card-only**, and restricted to the sender's tier: an owner can pick
+anything in the root, `admin/` or `guest/`; a guest can pick only `models/guest/`.
+Guessing an admin card's id returns "No card matches".
 
-`model default` loads `~/.opencode-xmpp/models/default.json`. If that file does not
-exist, the chat goes back to `[admin] model` and the reply says so.
+Matching is exact on `id` or `name`, then a case-insensitive substring, so `model ada`
+finds `Ada (Story)`. A raw model name such as `ollama/gemma4:latest` is rejected with a
+hint to add a card whose `base_model_id` is that model — the card is where the context
+and sampling settings live.
+
+`model default` loads `models/admin/default.json` for an owner or
+`models/guest/default.json` for a guest, falling back to `models/default.json`. If
+there is no default card, the chat goes back to `[admin]`/`[guest] model` and the reply
+says so.
 
 Switching is per chat and per card: each selection gets its own OpenCode session, so
 a context created for one model is never replayed into another. The selection is
-forgotten when the bridge restarts, and every chat starts on `default.json`.
+forgotten when the bridge restarts, and every chat starts on its tier's default card.
+
+Guests selecting a card changes only which model/persona answers them; the guest agent
+still has no shell, no edits and no subagents.
 
 ```text
-Model switched to card Ada (Story) via ada for this chat (base: ollama/gemma4:26b-64k).
+Model switched to card Ada (Story) (ada) for this chat.
 ```
 
 ## think-off / think-on
@@ -82,7 +97,8 @@ think-off
 think-on
 ```
 
-Disables or enables reasoning **in the card**, not in a copy of the model. The bridge:
+Owner only. Disables or enables reasoning **in the card**, not in a copy of the model.
+The bridge:
 
 1. rewrites `params.think` in the active card's JSON (`default.json` when no other card
    is selected),

@@ -1,7 +1,9 @@
 """Open WebUI-style model cards stored as JSON files.
 
-A card lives in ``~/.opencode-xmpp/models/*.json`` and is either a single
-object or a list of objects.  Only the fields the bridge needs are read:
+A card lives in ``~/.opencode-xmpp/models/`` and is either a single object or a
+list of objects.  ``models/guest/`` is for cards guests may pick, ``models/admin/``
+for admin-only cards, and the root holds shared/legacy cards (admin-only, plus the
+fallback ``default.json``).  Only the fields the bridge needs are read:
 ``id``/``name``, ``base_model_id``, ``params.system``, ``params.think`` and the
 Ollama request options (``params.num_ctx``, ``params.temperature``, ``top_p``,
 ``top_k``, ``repeat_penalty``, ...).  The large ``meta`` blobs (including
@@ -133,9 +135,7 @@ def default_path(directory: Path | None = None) -> Path:
     return root / DEFAULT_NAME
 
 
-def load_default(directory: Path | None = None) -> Card | None:
-    """The default card, or None when ``default.json`` is missing or invalid."""
-    path = default_path(directory)
+def _read_default(path: Path) -> Card | None:
     if not path.is_file():
         return None
     try:
@@ -148,6 +148,20 @@ def load_default(directory: Path | None = None) -> Card | None:
         if card is not None:
             return card
     return None
+
+
+def load_default(directory: Path | None = None) -> Card | None:
+    """The root ``default.json`` card, or None when it is missing or invalid."""
+    return _read_default(default_path(directory))
+
+
+def load_default_for(role: str, directory: Path | None = None) -> Card | None:
+    """The role's default card: ``models/<role>/default.json``, else the root one."""
+    root = Path(directory) if directory is not None else default_dir()
+    card = _read_default(root / role / DEFAULT_NAME)
+    if card is not None:
+        return card
+    return _read_default(root / DEFAULT_NAME)
 
 
 def _matching_entry(data: object, card: Card) -> dict | None:
@@ -190,9 +204,7 @@ def set_param(card: Card, key: str, value: object) -> Card:
     return updated
 
 
-def load_cards(directory: Path | None = None) -> list[Card]:
-    """Read every ``*.json`` card, skipping files that are not card shapes."""
-    root = Path(directory) if directory is not None else default_dir()
+def _read_cards(root: Path) -> list[Card]:
     if not root.is_dir():
         return []
     cards: list[Card] = []
@@ -206,6 +218,35 @@ def load_cards(directory: Path | None = None) -> list[Card]:
             card = _card(entry, path)
             if card is not None:
                 cards.append(card)
+    return cards
+
+
+def load_cards(directory: Path | None = None) -> list[Card]:
+    """Read every ``*.json`` card in one directory, skipping non-card files."""
+    root = Path(directory) if directory is not None else default_dir()
+    return _read_cards(root)
+
+
+def cards_for_role(role: str, directory: Path | None = None) -> list[Card]:
+    """The cards one trust tier may see and select.
+
+    Guests get ``models/guest/`` only. Admins get the root (shared/legacy cards),
+    ``models/admin/`` and ``models/guest/``, in that order, without duplicates.
+    """
+    root = Path(directory) if directory is not None else default_dir()
+    if role == "guest":
+        directories = [root / "guest"]
+    else:
+        directories = [root, root / "admin", root / "guest"]
+    cards: list[Card] = []
+    seen: set[tuple[str, str]] = set()
+    for folder in directories:
+        for card in _read_cards(folder):
+            key = (card.id.casefold(), card.base_id.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            cards.append(card)
     return cards
 
 

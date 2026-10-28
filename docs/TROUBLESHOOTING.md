@@ -141,6 +141,10 @@ reload; keeping `OLLAMA_NUM_PARALLEL=1` and a long `OLLAMA_KEEP_ALIVE` avoids it
 `model` only accepts **card IDs**; a raw model name is not a selection any more. Add a
 card whose `base_model_id` is that model, then select the card.
 
+A guest sees only `models/guest/`, so a card in the root or `models/admin/` is
+invisible and unselectable for them. Move it into `models/guest/` if a guest should
+use it.
+
 The provider fence comes from `[admin] model`, or from `default.json` when that is
 unset. That is intentional: a private local bot must not quietly answer through a
 hosted model. A card whose base is on another provider is hidden and rejected.
@@ -151,7 +155,8 @@ or `name` without the provider prefix.
 ## A card does not change anything
 
 - The card must be selected (`model <card-id>` or `model default`); a chat that has
-  never selected one uses `[admin] model` and that model's own defaults.
+  never selected one uses its tier's default card, or `[admin]`/`[guest] model` when
+  there is none.
 - `~/.config/opencode/opencode.jsonc` must exist, or there is nowhere to write the
   options.
 - If the reply is `I couldn't apply the card settings`, the file is not valid JSON or
