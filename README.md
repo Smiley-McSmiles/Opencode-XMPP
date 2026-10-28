@@ -97,12 +97,14 @@ passed to `opencode run --file`, so a vision model actually sees the photo and a
 audio-capable model hears the voice note. Audio support still depends on the model
 advertising `audio`; see [docs/OLLAMA.md](docs/OLLAMA.md).
 
-**Open WebUI model cards.** Drop an Open WebUI export (`*.json`) in
-`~/.opencode-xmpp/models/` and switch with `model my-card`. The card's persona is
-applied to your chat, and its `num_ctx`, `temperature`, `top_p`, `top_k`,
-`repeat_penalty`, `seed` and friends are written into the Ollama model's request
-options — so the card, not the base model's Modelfile, decides the context window.
-See [docs/MODEL-CARDS.md](docs/MODEL-CARDS.md).
+**Cards are the model menu.** Drop an Open WebUI export (`*.json`) in
+`~/.opencode-xmpp/models/` and switch with `model my-card`. `help` lists **only your
+cards**, never every model Ollama happens to have. The card's persona applies to your
+chat, and its `num_ctx`, `temperature`, `top_p`, `top_k`, `repeat_penalty`, `seed` and
+friends are written into the Ollama model's request options — so the card, not the
+base model's Modelfile, decides the context window. `default.json` is the card every
+chat starts with and what `model default` loads. See
+[docs/MODEL-CARDS.md](docs/MODEL-CARDS.md).
 
 **Group chats (MUC)** that answer when addressed by nick, or to every message.
 Encrypted rooms use OMEMO 2 over the XEP-0420 stanza-content envelope; the bridge
@@ -146,7 +148,7 @@ Message the bot from `local@example.org`:
 help
 ```
 
-You should get the command list, the current model and the models the bridge can see.
+You should get the command list, the current card and the cards the bridge can see.
 Add `remote@example.org` (or anyone) as a contact and they get the read-only guest
 tier.
 
@@ -180,17 +182,21 @@ plus a `params` object, and that is exactly what the bridge reads:
 
 | Field | Effect |
 | --- | --- |
-| `base_model_id` | Ollama model to run. `gemma4:26b-64k` or `ollama/gemma4:26b-64k` both work. |
+| `base_model_id` | Ollama model to run. `gemma4:26b-64k` or `ollama/gemma4:26b-64k` both work; `null` (Open WebUI's base-model export) uses the card `id`. |
 | `params.system` | Persona for the chat. `{{char}}` → card name, `{{user}}` → sender's local part. |
 | `params.think` | `true`/`false` → Ollama reasoning on/off for this model. |
 | `params.num_ctx` | Context window → OpenCode `limit.context` **and** Ollama request `options.num_ctx`. |
 | `params.temperature`, `top_p`, `top_k`, `min_p`, `typical_p`, `tfs_z`, `repeat_last_n`, `repeat_penalty`, `presence_penalty`, `frequency_penalty`, `mirostat*`, `num_keep`, `num_predict`, `max_tokens`, `num_batch`, `seed`, `stop` | Passed as Ollama request options. |
 
 Cards are per-chat: `model gemma-local` switches this conversation, `model default`
-resets it, and switching models gives each model its own session so an old context is
-never replayed into a model that cannot load it. The big `meta` blob Open WebUI adds
-(base64 images, descriptions) is ignored. A ready-to-copy example lives in
-[`examples/models/gemma-local.json`](examples/models/gemma-local.json).
+loads `default.json`, and each card gets its own session so an old context is never
+replayed into a model that cannot load it. `think-off` / `think-on` edit the active
+card's JSON — no `ollama create`, no second copy of the model. The big `meta` blob
+Open WebUI adds (base64 images, descriptions) is ignored. A ready-to-copy example
+lives in [`examples/models/default.json`](examples/models/default.json) (a base-model
+export) and [`examples/models/gemma-local.json`](examples/models/gemma-local.json) (a
+persona). Card files are always written back with two-space indentation and one field
+per line.
 
 Full reference: [docs/MODEL-CARDS.md](docs/MODEL-CARDS.md).
 
@@ -204,17 +210,29 @@ opencode models | grep ollama
 # ollama/gemma4:latest
 ```
 
-Then tell the bridge which model to use by default:
+Then give the bridge its default card — `~/.opencode-xmpp/models/default.json`:
+
+```json
+{
+  "id": "gemma-local",
+  "name": "Gemma (Local)",
+  "base_model_id": "gemma4:latest",
+  "params": { "think": false, "num_ctx": 32768, "temperature": 0.7 }
+}
+```
+
+Every chat starts with it, and `model default` goes back to it. `[admin] model` is
+only a fallback for when there is no `default.json`:
 
 ```toml
 [admin]
 agent = "xmpp-admin"
-model = "ollama/gemma4:latest"
+# model = "ollama/gemma4:latest"
 ```
 
-The first `/` segment is the provider, so the Ollama bridge instance is restricted to
-`ollama/*` models: OpenCode's own hosted free models are hidden from `help` and
-rejected by `model`, which keeps a private local chat on the host.
+The provider of `[admin] model` — or of `default.json` when that is unset — is the
+only provider this instance will use, so a local Ollama bot never falls back to a hosted
+model by accident.
 
 **Long conversations.** Two things matter for a local model that freezes after a long
 chat:
@@ -237,10 +255,10 @@ cost a turn. Full reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 | Command | Who | What it does |
 | --- | --- | --- |
 | `stop` | anyone | Interrupt the answer in progress (`Stopped.`) without a new question |
-| `help` / `?` | owner, DM | Commands, current model, visible models and model cards |
-| `model <provider/model\|card>` | owner, DM | Switch this chat's model or card |
-| `model default` | owner, DM | Reset to the bridge default |
-| `think-off` / `think-on` | owner, DM | Toggle Ollama reasoning for the configured model(s) |
+| `help` / `?` | owner, DM | Commands, current card and the available model cards |
+| `model <card-id>` | owner, DM | Switch this chat to a model card |
+| `model default` | owner, DM | Load `default.json` for this chat |
+| `think-off` / `think-on` | owner, DM | Save the reasoning toggle to the active card's JSON |
 | `clear` | anyone, DM | Stop the turn and delete every known OpenCode session for this contact |
 | `restart` | owner, DM | Acknowledge, then restart this bridge's systemd unit |
 | `repair [focus]` | owner, DM | Model-free diagnostics, sent as a redacted report |
@@ -259,7 +277,7 @@ opencode_xmpp/policy.py       JID normalisation, owner/guest tiering, derived se
 opencode_xmpp/bot.py          slixmpp client, per-conversation runner, chat commands
 opencode_xmpp/opencode_cli.py one `opencode run` per turn; interrupt, compact, delete
 opencode_xmpp/cards.py        Open WebUI model cards → persona + Ollama options
-opencode_xmpp/thinking.py     Ollama reasoning toggles in opencode.jsonc
+opencode_xmpp/thinking.py     reasoning overrides applied to opencode.jsonc
 opencode_xmpp/uploads.py      XEP-0363 uploads (AES-GCM), XEP-0454 downloads
 opencode_xmpp/omemo.py        OMEMO device management
 opencode_xmpp/sce.py          XEP-0420 stanza-content envelope for encrypted rooms
@@ -280,7 +298,7 @@ opencode.toml          bot JID, owners, agents, limits
 secrets/account.secret XMPP password, 0600, git-ignored
 omemo.json             OMEMO identity and sessions — back this up
 spool/                 per-contact attachment spool, emptied after each turn
-models/                your model cards (this is fixed, not configurable)
+models/                your model cards; default.json is the default card
 venv/                  the bridge's own virtualenv
 ```
 
@@ -328,7 +346,8 @@ especially if guests will use it.
 - **Audio needs an audio-capable model.** The bridge attaches a voice note to the
   turn, but Ollama has to advertise `audio` for the model; current Gemma builds
   advertise `completion`, `vision`, `tools` and `thinking`, not `audio`.
-- **Model and card selections are per chat** and reset when the bridge restarts.
+- **Cards are the only selectable unit.** A chat that has selected a card keeps it
+  until `model default` or a restart; every chat starts on `default.json`.
 - Interfaces may still move, but the wire protocol is XMPP: your chat client does not
   care what happens behind the bridge.
 

@@ -24,7 +24,7 @@ from pathlib import Path
 import slixmpp
 from slixmpp import JID
 
-from . import approvals, cards, diagnostics, omemo, opencode_cli as cli, reactions, thinking, uploads
+from . import approvals, cards, diagnostics, omemo, opencode_cli as cli, reactions, uploads
 from .chunk import split_message
 from .config import Config, Tier, read_secret
 from .policy import (GUEST, OWNER, RateLimiter, bare_jid, is_ignored,
@@ -198,6 +198,9 @@ class Bridge(slixmpp.ClientXMPP):
         self._chats: dict[str, _Chat] = {}
         self._stopped = asyncio.Event()
         self._upload_host: str = ""
+        # ``default.json`` is the card every chat starts with. None means the
+        # bridge falls back to [admin]/[guest] model, as before.
+        self._default_card: cards.Card | None = cards.load_default()
         _instance = bare_jid(cfg.account.jid).split('@', 1)[0]
         self._pending = approvals.PendingStore(
             Path(cfg.features.omemo_storage).expanduser().with_name(f"pending-{_instance}.json"))
@@ -265,6 +268,21 @@ class Bridge(slixmpp.ClientXMPP):
         asyncio.create_task(self._after_start())
 
     async def _after_start(self) -> None:
+        # A card's context and sampling options live in opencode's config, so the
+        # default card has to be applied once before the first turn.
+        if self._default_card is not None:
+            path = self._opencode_config_path()
+            if path.is_file():
+                try:
+                    changed = await asyncio.to_thread(
+                        self._apply_card_config, path, self._default_card)
+                except (OSError, ValueError) as exc:
+                    log.warning("could not apply default card %s: %s",
+                                self._default_card.id, exc)
+                else:
+                    if changed:
+                        log.info("applied default card %s (%s) to %s",
+                                 self._default_card.id, self._default_card.base_model, path)
         # Advertise presence to every contact that is subscribed to us; without a
         # direct presence after a fresh approval, clients can keep showing "offline".
         try:
@@ -867,49 +885,46 @@ class Bridge(slixmpp.ClientXMPP):
                 return candidate
         return base / "opencode" / "opencode.jsonc"
 
-    @staticmethod
-    def _apply_thinking_config(path: Path, models: list[str], enabled: bool) -> list[str]:
-        data = load_opencode_config(path)
-        changed = thinking.apply_thinking(data, models, enabled)
-        if changed:
-            tmp = path.with_name(path.name + ".tmp")
-            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-                           encoding="utf-8")
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, path)
-        return changed
-
     async def _handle_think(self, key: str, item: dict, state: str) -> None:
-        """Owner said ``think-off``/``think-on``: toggle Ollama reasoning."""
-        models = list(dict.fromkeys(
-            m.strip() for m in (self.cfg.admin.model, self.cfg.guest.model) if m.strip()))
-        if not models:
-            await self._reply(key, item, "No model is configured on this bridge.")
-            return
-        path = self._opencode_config_path()
-        if not path.is_file():
-            await self._reply(key, item, f"I can't find {path}.")
+        """Owner said ``think-off``/``think-on``: save it to the active card."""
+        chat = self._chats.setdefault(key, _Chat())
+        card = self._active_card(chat)
+        if card is None:
+            await self._reply(
+                key, item,
+                f"No model card is active. Add {cards.DEFAULT_NAME} to "
+                f"{cards.default_dir()} or select a card with model <card-id>.")
             return
         enabled = state == "on"
         try:
-            changed = await asyncio.to_thread(
-                self._apply_thinking_config, path, models, enabled)
+            updated = await asyncio.to_thread(cards.set_param, card, "think", enabled)
         except (OSError, ValueError) as exc:
-            log.warning("could not update thinking for %s: %s", path, exc)
-            await self._reply(key, item, f"I couldn't update {path}: {exc}")
+            log.warning("could not update thinking for %s: %s", card.source, exc)
+            await self._reply(key, item, f"I couldn't update {card.source.name}: {exc}")
             return
-        if not changed:
-            current = ", ".join(models)
-            await self._reply(
-                key, item,
-                f"think-on/think-off only applies to Ollama models; this bridge uses {current}.")
-            return
+        chat.card = updated
+        chat.model_override = updated.model
+        if (self._default_card is not None
+                and updated.id == self._default_card.id
+                and updated.source == self._default_card.source):
+            self._default_card = updated
+        path = self._opencode_config_path()
+        if path.is_file():
+            try:
+                await asyncio.to_thread(self._apply_card_config, path, updated)
+            except (OSError, ValueError) as exc:
+                log.warning("could not apply thinking for %s: %s", updated.id, exc)
+                await self._reply(
+                    key, item,
+                    f"Saved thinking {'on' if enabled else 'off'} to "
+                    f"{updated.source.name}, but I couldn't apply it to opencode: {exc}")
+                return
         verb = "on" if enabled else "off"
-        log.info("owner %s turned thinking %s for %s", key, verb, ", ".join(changed))
+        log.info("owner %s turned thinking %s for card %s", key, verb, updated.id)
         await self._reply(
             key, item,
-            f"Thinking is {verb} for {', '.join(changed)}. "
-            "OpenCode reloads the config; the next turn uses it.")
+            f"Thinking is {verb} for card {updated.name} and saved to "
+            f"{updated.source.name}. The next turn uses it.")
 
     def _allowed_provider(self) -> str:
         """The provider this bridge instance is meant to use.
@@ -922,6 +937,10 @@ class Bridge(slixmpp.ClientXMPP):
             model = (model or "").strip()
             if "/" in model:
                 return model.split("/", 1)[0].strip().lower()
+        # A card-only deployment has no [admin] model; the default card then
+        # decides which provider this bridge is allowed to use.
+        if self._default_card is not None and "/" in self._default_card.model:
+            return self._default_card.model.split("/", 1)[0].strip().lower()
         return ""
 
     def _model_allowed(self, model: str) -> bool:
@@ -946,20 +965,62 @@ class Bridge(slixmpp.ClientXMPP):
             Bridge._write_opencode_config(path, data)
         return changed
 
+    # -- model cards --------------------------------------------------------
+
+    def _active_card(self, chat: _Chat) -> cards.Card | None:
+        """The card this chat uses: an explicit choice, else ``default.json``."""
+        return chat.card if chat.card is not None else self._default_card
+
+    def _active_model(self, chat: _Chat, tier: str) -> str:
+        """The opencode model id for this chat, before any per-chat override."""
+        if chat.model_override:
+            return chat.model_override
+        card = self._active_card(chat)
+        if card is not None:
+            return card.model
+        return self.cfg.admin.model if tier == OWNER else self.cfg.guest.model
+
+    def _reload_default_card(self) -> cards.Card | None:
+        self._default_card = cards.load_default()
+        return self._default_card
+
+    async def _select_card(self, key: str, item: dict, chat: _Chat,
+                           card: cards.Card) -> None:
+        """Make ``card`` this chat's model and apply its options."""
+        path = self._opencode_config_path()
+        # Set the chat state before the (possibly slow) config write, so a
+        # help command arriving immediately afterwards already sees the card.
+        old_model, old_card = chat.model_override, chat.card
+        chat.model_override = card.model
+        chat.card = card
+        if path.is_file():
+            try:
+                await asyncio.to_thread(self._apply_card_config, path, card)
+            except (OSError, ValueError) as exc:
+                chat.model_override, chat.card = old_model, old_card
+                await self._reply(key, item, f"I couldn't apply the card settings: {exc}")
+                return
+        log.info("owner %s selected model card %s (%s)", key, card.id, card.model)
+        await self._reply(
+            key, item,
+            f"Model switched to card {card.name} via {card.id} for this chat "
+            f"(base: {card.base_model}). Its persona and model parameters apply "
+            "on the next turn; model default goes back to default.json.")
+
     async def _handle_help(self, key: str, item: dict) -> None:
-        """Owner said ``help``: commands, current model, models and cards."""
+        """Owner said ``help``: commands, current card and the card list."""
         chat = self._chats.get(key) or _Chat()
-        settings = _settings_for(self.cfg, self.cfg.admin)
-        current = chat.model_override or settings.model or "(default)"
-        if chat.card is not None:
-            current += f" (card: {chat.card.name})"
+        card = self._active_card(chat)
+        current = self._active_model(chat, OWNER) or "(default)"
+        if card is not None:
+            current += f" (card: {card.name})"
         lines = [
             "Commands (owner):",
             "  stop",
             "  help",
-            "  model <provider/model|card-id>",
+            "  model <card-id>",
             "  model default",
-            "  think-off / think-on  (Ollama models only)",
+            "  think-off / think-on  (saved to the active card)",
             "  restart",
             "  repair [focus]",
             "  clear",
@@ -968,120 +1029,76 @@ class Bridge(slixmpp.ClientXMPP):
             "  approve <jid> / deny <jid> / pending",
             "",
             f"Current chat model: {current}",
-            "",
-            ("Models (restricted to " + self._allowed_provider() + "):")
-            if self._allowed_provider() else "Models:",
         ]
-        try:
-            models = await asyncio.to_thread(cli.list_models, settings)
-            models = [model for model in models if self._model_allowed(model)]
-            lines.extend(f"  {model}" for model in models[:80])
-            if len(models) > 80:
-                lines.append(f"  ... and {len(models) - 80} more")
-        except cli.CLIError as exc:
-            lines.append(f"  (unavailable: {exc.user_message})")
-
         card_dir = cards.default_dir()
         lines.extend(["", f"Cards ({card_dir}):"])
         try:
-            found = [card for card in cards.load_cards(card_dir)
-                     if self._model_allowed(card.base_model)]
+            found = [entry for entry in cards.load_cards(card_dir)
+                     if self._model_allowed(entry.base_model)]
         except OSError as exc:
             lines.append(f"  (unreadable: {exc})")
         else:
+            default = self._default_card
             if found:
-                for card in found:
-                    lines.append(f"  {card.id} — {card.name}")
-                    lines.append(f"      base: {card.base_model}")
-                lines.append("  select one with: model <card-id>")
+                for entry in found:
+                    is_default = (default is not None
+                                  and entry.id == default.id
+                                  and entry.source == default.source)
+                    lines.append(f"  {entry.id} — {entry.name}"
+                                 + ("  [default]" if is_default else ""))
+                    lines.append(f"      base: {entry.base_model}")
+                lines.append("  select a card with: model <card-id>")
             else:
-                lines.append("  (none — put .json model cards in that directory)")
+                lines.append(f"  (none — add {cards.DEFAULT_NAME} or any card to that directory)")
         await self._reply(key, item, "\n".join(lines))
 
     async def _handle_model(self, key: str, item: dict, argument: str) -> None:
-        """Owner said ``model <name>``: switch this chat's model or card."""
+        """Owner said ``model``: pick one of the model cards."""
         chat = self._chats.setdefault(key, _Chat())
         argument = argument.strip()
         if not argument:
-            await self._reply(key, item,
-                              "Usage: model <provider/model|card-id> or model default. Use help to list.")
+            await self._reply(
+                key, item,
+                "Usage: model <card-id> or model default. Send help to list the cards.")
             return
         if argument.lower() in ("default", "reset", "off"):
-            chat.model_override = ""
-            chat.card = None
-            default = _settings_for(self.cfg, self.cfg.admin).model or "(default)"
-            await self._reply(key, item, f"Model reset to the bridge default: {default}.")
+            card = self._reload_default_card()
+            if card is None:
+                chat.model_override, chat.card = "", None
+                fallback = (self.cfg.admin.model or "(the bridge default)")
+                await self._reply(
+                    key, item,
+                    f"There is no {cards.DEFAULT_NAME} in {cards.default_dir()}, so this "
+                    f"chat now uses {fallback}. Add a default.json to make it explicit.")
+                return
+            if not self._model_allowed(card.base_model):
+                await self._reply(
+                    key, item,
+                    f"The default card uses {card.base_model}, but this bridge is "
+                    f"restricted to {self._allowed_provider()} models.")
+                return
+            await self._select_card(key, item, chat, card)
             return
 
         card = cards.find_card(cards.load_cards(cards.default_dir()), argument)
-        if card is not None and not self._model_allowed(card.base_model):
+        if card is None:
+            hint = ""
+            if "/" in argument or ":" in argument:
+                base = argument.split("#", 1)[0]
+                hint = (f" To use {argument!r}, add a card whose \"base_model_id\" is "
+                        f"{(base.split('/', 1)[-1] or base)!r}.")
+            await self._reply(
+                key, item,
+                f"No card matches {argument!r}. Models are chosen through cards in "
+                f"{cards.default_dir()}.{hint} Send help to list them.")
+            return
+        if not self._model_allowed(card.base_model):
             await self._reply(
                 key, item,
                 f"Card {card.name} uses {card.base_model}, but this bridge is restricted "
                 f"to {self._allowed_provider()} models.")
             return
-        if card is not None:
-            path = self._opencode_config_path()
-            # Set the chat state before the (possibly slow) config write, so a
-            # help command arriving immediately afterwards already sees the card.
-            old_model, old_card = chat.model_override, chat.card
-            chat.model_override = card.model
-            chat.card = card
-            if path.is_file():
-                try:
-                    await asyncio.to_thread(self._apply_card_config, path, card)
-                except (OSError, ValueError) as exc:
-                    chat.model_override, chat.card = old_model, old_card
-                    await self._reply(key, item, f"I couldn't apply the card settings: {exc}")
-                    return
-            log.info("owner %s selected model card %s (%s)", key, card.id, card.model)
-            await self._reply(
-                key, item,
-                f"Model switched to card {card.name} via {card.id} for this chat "
-                f"(base: {card.base_model}). Its persona and model parameters apply "
-                "on the next turn; model default clears it.")
-            return
-
-        if not self._model_allowed(argument) and "/" in argument:
-            await self._reply(
-                key, item,
-                f"This bridge is restricted to {self._allowed_provider()} models.")
-            return
-
-        settings = _settings_for(self.cfg, self.cfg.admin)
-        try:
-            models = await asyncio.to_thread(cli.list_models, settings)
-        except cli.CLIError as exc:
-            await self._reply(key, item, f"I couldn't list the models: {exc.user_message}")
-            return
-        models = [model for model in models if self._model_allowed(model)]
-
-        base = argument.split("#", 1)[0]
-        exact = [model for model in models if model == argument]
-        if not exact:
-            exact = [model for model in models if model == base]
-        if not exact:
-            exact = [model for model in models if model.endswith("/" + base)]
-        if not exact:
-            exact = [model for model in models if base in model]
-        if not exact:
-            await self._reply(key, item,
-                              f"Unknown model {argument!r}. Send help to list the available models.")
-            return
-        if len(exact) > 1:
-            await self._reply(
-                key, item,
-                "That matches more than one model; use the full provider/model:\n"
-                + "\n".join(f"  {model}" for model in exact[:12]))
-            return
-        chosen = argument if "#" in argument or argument in models else exact[0]
-        chat.model_override = chosen
-        chat.card = None
-        log.info("owner %s selected model %s", key, chosen)
-        await self._reply(
-            key, item,
-            f"Model switched to {chosen} for this chat. "
-            "Use model default to reset; send clear if the old context is incompatible.")
+        await self._select_card(key, item, chat, card)
 
     async def _handle_clear(self, key: str, item: dict) -> None:
         """Hard-clear the sender's derived OpenCode session."""
@@ -1111,16 +1128,19 @@ class Bridge(slixmpp.ClientXMPP):
                     return
             tier = tier_for(key, self.cfg.policy.owners)
             settings = _settings_for(self.cfg, self.cfg.admin if tier == OWNER else self.cfg.guest)
-            default_model = (self.cfg.admin.model if tier == OWNER else self.cfg.guest.model)
-            models = {default_model, chat.model_override}
+            card = self._active_card(chat)
+            default_model = (card.model if card is not None
+                             else (self.cfg.admin.model if tier == OWNER else self.cfg.guest.model))
+            models = {default_model, self.cfg.admin.model, self.cfg.guest.model,
+                      chat.model_override}
             if chat.card is not None:
                 models.add(chat.card.model)
             session_ids = set(chat.session_ids)
             for model in models:
                 if model:
                     session_ids.add(self._scoped_session_id(key, model))
-            if chat.card is not None:
-                session_ids.add(self._scoped_session_id(key, chat.card.model, chat.card.id))
+            if card is not None:
+                session_ids.add(self._scoped_session_id(key, card.model, card.id))
             # Migration from the pre-scope bridge: the unscoped session.
             session_ids.add(session_id_for(
                 self.cfg.account.jid, key, self.cfg.policy.session_id_version))
@@ -1240,9 +1260,9 @@ class Bridge(slixmpp.ClientXMPP):
         after a switch makes the CLI report "model is not available"; a scope
         keeps each model's transcript separate and starts cleanly.
         """
-        model = chat.model_override or (
-            self.cfg.admin.model if tier == OWNER else self.cfg.guest.model)
-        return self._scoped_session_id(key, model, chat.card.id if chat.card else "")
+        card = self._active_card(chat)
+        model = self._active_model(chat, tier)
+        return self._scoped_session_id(key, model, card.id if card else "")
 
     async def _handle_turn(self, key: str, chat: _Chat, item: dict) -> None:
         room = item.get("room")
@@ -1254,15 +1274,17 @@ class Bridge(slixmpp.ClientXMPP):
             tier = tier_for(sender, self.cfg.policy.owners)
 
         settings = _settings_for(self.cfg, self.cfg.admin if tier == OWNER else self.cfg.guest)
-        if chat.model_override:
-            settings = replace(settings, model=chat.model_override)
+        model = self._active_model(chat, tier)
+        if model:
+            settings = replace(settings, model=model)
         who = f"{item.get('nick')} in the group chat {room}" if room else sender
         preamble = _turn_preamble(self.cfg, who, room)
         body = preamble + item["body"]
-        if chat.card is not None:
-            card_system = cards.render_system(chat.card, sender)
+        card = self._active_card(chat)
+        if card is not None:
+            card_system = cards.render_system(card, sender)
             if card_system:
-                body = (preamble + f"[Active model card: {chat.card.name}]\n"
+                body = (preamble + f"[Active model card: {card.name}]\n"
                         f"{card_system}\n\n" + item["body"])
 
         notes: list[str] = []

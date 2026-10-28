@@ -81,9 +81,10 @@ Each gets:
 The unit name comes from the bot JID's local part, so they are
 `opencode-xmpp-llm-bot.service` and `opencode-xmpp-cloud-bot.service`.
 
-The `[admin] model` provider also acts as a **provider fence**: an Ollama bot cannot
-switch to a hosted model and a hosted bot cannot silently fall back to a local one.
-That matters when the promise is "this conversation stays on this machine".
+The provider of each bot's `default.json` (or of `[admin] model` when it has no default
+card) acts as a **provider fence**: an Ollama bot cannot switch to a hosted model and a
+hosted bot cannot silently fall back to a local one. That matters when the promise is
+"this conversation stays on this machine".
 
 If two bots should not answer each other, put their JIDs in `[policy] ignore_jids`:
 

@@ -136,24 +136,36 @@ audio-capable model. See [OLLAMA.md](OLLAMA.md).
 A request that started with a small context and later needed more can also hit a model
 reload; keeping `OLLAMA_NUM_PARALLEL=1` and a long `OLLAMA_KEEP_ALIVE` avoids it.
 
-## "Unknown model" or "restricted to ollama models"
+## "No card matches" or "restricted to ollama models"
 
-`[admin] model = "ollama/..."` fences the bridge to that provider. That is intentional:
-a private local bot must not quietly answer through a hosted model. To allow every
-provider, set `[admin] model = ""`.
+`model` only accepts **card IDs**; a raw model name is not a selection any more. Add a
+card whose `base_model_id` is that model, then select the card.
 
-The argument to `model` is a **card ID first**, then a model. `model ollama/my-card`
-is neither.
+The provider fence comes from `[admin] model`, or from `default.json` when that is
+unset. That is intentional: a private local bot must not quietly answer through a
+hosted model. A card whose base is on another provider is hidden and rejected.
+
+`model ollama/my-card` is neither a card ID nor a model — cards are selected by `id`
+or `name` without the provider prefix.
 
 ## A card does not change anything
 
-- The card must be selected (`model <card-id>`); selecting the base model uses the
-  model's own defaults.
+- The card must be selected (`model <card-id>` or `model default`); a chat that has
+  never selected one uses `[admin] model` and that model's own defaults.
 - `~/.config/opencode/opencode.jsonc` must exist, or there is nowhere to write the
   options.
 - If the reply is `I couldn't apply the card settings`, the file is not valid JSON or
   not writable. Comments are accepted now, but the file is rewritten as plain JSON.
 - Two cards on the same base model overwrite each other's options.
+- `think-off` / `think-on` edit the **card** and re-apply it; if the reply says it saved
+  the file but could not apply it, check the opencode config path and permissions.
+
+## A card edited on disk did not take effect
+
+Cards are read by `help`, `model` and `think-off`. `default.json` is also applied at
+startup, but a running chat keeps the card it selected. After editing `default.json`,
+send `model default` (or restart the bridge) to apply it; after editing another card,
+select it again.
 
 Details: [MODEL-CARDS.md](MODEL-CARDS.md).
 

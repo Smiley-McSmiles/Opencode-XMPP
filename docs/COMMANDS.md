@@ -7,9 +7,9 @@ broken.
 | Command | Who | Where | What it does |
 | --- | --- | --- | --- |
 | [`stop`](#stop) | anyone | DM | Interrupt the current answer |
-| [`help`](#help) | owner | DM | Commands, current model, models, cards |
-| [`model`](#model) | owner | DM | Switch this chat's model or card |
-| [`think-off` / `think-on`](#thinking) | owner | DM | Toggle Ollama reasoning |
+| [`help`](#help) | owner | DM | Commands, current card, available cards |
+| [`model`](#model) | owner | DM | Switch this chat to a model card |
+| [`think-off` / `think-on`](#thinking) | owner | DM | Save reasoning on/off in the active card |
 | [`clear`](#clear) | anyone | DM | Delete this contact's OpenCode sessions |
 | [`repair`](#repair) | owner | DM | Model-free diagnostics |
 | [`restart`](#restart) | owner | DM | Restart this bridge's unit |
@@ -43,30 +43,33 @@ first. A turn that carries a photo or voice note is never interrupted.
 Owner only. Lists:
 
 - every command,
-- the model and card active in this chat,
-- the models the bridge is allowed to see,
+- the card (and base model) active in this chat,
 - the model cards in `~/.opencode-xmpp/models/`, with their base model.
 
-If `[admin] model` names a provider, the list is restricted to it — an Ollama bridge
-shows only `ollama/*`.
+`help` lists **cards only** — it never dumps every model Ollama has. The default card is
+marked `[default]`. If the bridge is restricted to a provider (from `[admin] model` or
+`default.json`), cards on other providers are hidden.
+
+If you have no cards yet, the list says so and points at the folder.
 
 ## model
 
 ```text
-model <card-id>                 # apply a card
-model <provider/model>          # switch to a model directly
-model <provider/model#variant>  # with a variant (when the provider has them)
-model default                   # back to [admin] model
+model <card-id>     # switch this chat to a model card
+model default       # load default.json
 ```
 
-When the argument matches a card ID or name, the card wins: its persona, `think`,
-`num_ctx` and sampling options apply. Otherwise it is looked up in `opencode models`,
-first exactly, then by suffix and finally by substring. An ambiguous match lists the
-candidates instead of guessing.
+Selection is **card-only**. Matching is exact on `id` or `name`, then a case-insensitive
+substring, so `model ada` finds `Ada (Story)`. A raw model name such as
+`ollama/gemma4:latest` is rejected with a hint to add a card whose `base_model_id` is
+that model — the card is where the context and sampling settings live.
 
-Switching is per chat and per model: each selection gets its own OpenCode session, so
+`model default` loads `~/.opencode-xmpp/models/default.json`. If that file does not
+exist, the chat goes back to `[admin] model` and the reply says so.
+
+Switching is per chat and per card: each selection gets its own OpenCode session, so
 a context created for one model is never replayed into another. The selection is
-forgotten when the bridge restarts.
+forgotten when the bridge restarts, and every chat starts on `default.json`.
 
 ```text
 Model switched to card Ada (Story) via ada for this chat (base: ollama/gemma4:26b-64k).
@@ -79,13 +82,19 @@ think-off
 think-on
 ```
 
-Disables or enables reasoning for the bridge's configured Ollama models by editing
-`capabilities.reasoning` and `body.think` in `~/.config/opencode/opencode.jsonc`. The
-next turn uses the new setting. For OpenRouter-style models the command replies that it
-does not apply.
+Disables or enables reasoning **in the card**, not in a copy of the model. The bridge:
 
-Prefer `"params": { "think": false }` on a card when you only want one model affected;
-it survives `think-on`.
+1. rewrites `params.think` in the active card's JSON (`default.json` when no other card
+   is selected),
+2. applies the card's options to `~/.config/opencode/opencode.jsonc`,
+3. answers with the card name and the file it saved.
+
+That means the setting survives restarts, is visible in the JSON, and is per card: turn
+thinking off for a chatty companion and leave it on for a coder. Edit the JSON by hand
+instead if you prefer — `"params": { "think": false }` is the same thing.
+
+There is no active card to edit only when the bridge runs without `default.json` and no
+card has been selected; the reply says so.
 
 ## clear
 

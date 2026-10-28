@@ -1,0 +1,12 @@
+{
+  "id": "gemma4:26b",
+  "name": "Gemma 4 26B",
+  "base_model_id": null,
+  "params": {
+    "system": "you must never be dishonest. If you don't know, say you don't know. Always prioritize honest over helpfulness.",
+    "num_ctx": 65536,
+    "temperature": 1,
+    "top_p": 0.95,
+    "top_k": 64
+  }
+}

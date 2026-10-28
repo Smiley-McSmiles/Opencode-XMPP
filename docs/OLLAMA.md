@@ -37,26 +37,40 @@ Check it without the bridge:
 opencode run --model ollama/gemma4:latest "reply with the single word: ready"
 ```
 
-## 2. Choose the bot's model
+## 2. Choose the bot's default card
 
-```toml
-# ~/.opencode-xmpp/opencode.toml
-[admin]
-agent = "xmpp-admin"
-model = "ollama/gemma4:latest"
+Models are chosen through **cards**, not from a list of everything Ollama has. The
+default card is:
+
+```
+~/.opencode-xmpp/models/default.json
 ```
 
-The first segment is the provider. When it is set, the bridge instance is
-**restricted to that provider**:
+```json
+{
+  "id": "gemma4:26b",
+  "name": "Gemma 4 26B",
+  "base_model_id": null,
+  "params": { "think": false, "num_ctx": 65536, "temperature": 1.0 }
+}
+```
 
-- `help` lists only `ollama/*` models and cards whose base is an Ollama model.
-- `model openrouter/...` is refused with an explanation.
-- OpenCode's own hosted free models never show up in a private local chat.
+(`base_model_id: null` is how an Open WebUI export says "this id is the base model" —
+see [MODEL-CARDS.md](MODEL-CARDS.md).)
 
-Leave `model = ""` to expose every provider opencode knows.
+`help` then lists your cards, and `model default` goes back to this one.
 
-`model` can also be a **model card** ID once a card exists — see
-[MODEL-CARDS.md](MODEL-CARDS.md).
+`[admin] model` is a fallback only, used when there is no `default.json`:
+
+```toml
+[admin]
+agent = "xmpp-admin"
+# model = "ollama/gemma4:latest"
+```
+
+The provider of `default.json` (or of `[admin] model` when it is set) is the only
+provider this instance uses: an Ollama bot never shows or accepts hosted models, so a
+private local chat cannot leave the host by accident.
 
 ## 3. Context window
 
@@ -237,4 +251,5 @@ model default
 
 Each selection gets its own OpenCode session, so switching never replays a context
 into a model that cannot load it. Selections are per chat and reset when the bridge
-restarts; use `[admin] model` to change the default for everyone.
+restarts, which starts every chat on `default.json`. Edit `default.json` to change the
+default for everyone.

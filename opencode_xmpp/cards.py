@@ -11,9 +11,12 @@ base64 images) are ignored.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+DEFAULT_NAME = "default.json"
 
 # Sampling options Ollama accepts in a request body.  Open WebUI stores the same
 # names under ``params``; ``max_tokens`` is the OpenAI spelling of ``num_predict``.
@@ -91,17 +94,20 @@ def _options_from(params: dict) -> dict[str, object]:
 def _card(entry: dict, source: Path) -> Card | None:
     if not isinstance(entry, dict):
         return None
+    cid = _text(entry.get("id") or entry.get("slug") or entry.get("name"))
+    name = _text(entry.get("name") or cid)
+    if not cid or not name:
+        return None
     base = _text(entry.get("base_model_id") or entry.get("baseModelId"))
     if not base:
-        return None
+        # Open WebUI exports a model that *is* a base model with
+        # base_model_id: null, and its id is the Ollama model name
+        # ("gemma4:26b"). Treat that as the base instead of dropping the card.
+        base = cid
     if base.startswith("ollama/"):
         base = base.split("/", 1)[1]
     base = base.strip()
     if not base:
-        return None
-    cid = _text(entry.get("id") or entry.get("slug") or entry.get("name"))
-    name = _text(entry.get("name") or cid)
-    if not cid or not name:
         return None
 
     params = entry.get("params")
@@ -119,6 +125,69 @@ def _card(entry: dict, source: Path) -> Card | None:
     return Card(id=cid, name=name, base_model=f"ollama/{base}", base_id=base,
                 system=system, think=think, num_ctx=num_ctx, source=source,
                 options=_options_from(params))
+
+
+def default_path(directory: Path | None = None) -> Path:
+    """``default.json``: the card a chat starts with and ``model default`` uses."""
+    root = Path(directory) if directory is not None else default_dir()
+    return root / DEFAULT_NAME
+
+
+def load_default(directory: Path | None = None) -> Card | None:
+    """The default card, or None when ``default.json`` is missing or invalid."""
+    path = default_path(directory)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    entries = data if isinstance(data, list) else [data]
+    for entry in entries:
+        card = _card(entry, path)
+        if card is not None:
+            return card
+    return None
+
+
+def _matching_entry(data: object, card: Card) -> dict | None:
+    entries = data if isinstance(data, list) else [data]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        found = _card(entry, card.source)
+        if found is not None and found.id == card.id and found.base_id == card.base_id:
+            return entry
+    return None
+
+
+def set_param(card: Card, key: str, value: object) -> Card:
+    """Write ``params[key]`` back to the card's file and return the new card.
+
+    Only the matching entry is touched, so a file holding several cards keeps the
+    rest intact. ``meta`` and unknown fields survive.
+    """
+    try:
+        data = json.loads(card.source.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"cannot read {card.source.name}: {exc}") from exc
+    except ValueError as exc:
+        raise ValueError(f"{card.source.name} is not valid JSON: {exc}") from exc
+    entry = _matching_entry(data, card)
+    if entry is None:
+        raise ValueError(f"{card.source.name} no longer contains card {card.id!r}")
+    params = entry.get("params")
+    if not isinstance(params, dict):
+        params = entry["params"] = {}
+    params[key] = value
+    tmp = card.source.with_name(card.source.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, card.source)
+    updated = _card(entry, card.source)
+    if updated is None:  # pragma: no cover - the entry was valid a moment ago
+        raise ValueError(f"{card.source.name} produced an invalid card")
+    return updated
 
 
 def load_cards(directory: Path | None = None) -> list[Card]:

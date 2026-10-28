@@ -7,6 +7,10 @@
 #                      → full tools: terminal, files, projects, web
 #  Everyone else:      read-only tools (read, glob, grep, web)
 #
+#  Model cards:        ~/.opencode-xmpp/models/*.json
+#                      default.json is the card every chat starts with and the
+#                      one `model default` loads.
+#
 #  Model credentials are NOT here. Run `opencode auth login` once; the bridge
 #  runs the CLI as your user and the CLI owns provider authentication.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -25,7 +29,8 @@ password_file = "secrets/account.secret"
 # shipped agents there.
 [admin]
 agent = "xmpp-admin"
-# model = "ollama/gemma4:latest"   # empty = every provider opencode knows
+# model = "ollama/gemma4:latest"   # fallback when there is no default.json card;
+#                                 # empty = no fallback (every provider allowed)
 timeout_s = 600
 auto_approve = true
 

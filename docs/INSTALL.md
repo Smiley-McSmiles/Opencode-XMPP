@@ -179,9 +179,12 @@ Notes:
 
 - `password_file` and every other path are resolved **relative to the config file**,
   so the directory can be moved as a unit.
-- `[admin] model` also decides the bridge's allowed provider: the first segment
-  (`ollama`) is the only provider `help` lists and `model` accepts. Leave it empty
-  to allow every provider opencode knows.
+- `[admin] model` is a fallback for when there is no `default.json` card. Its provider
+  (the first `/` segment, e.g. `ollama`) — or the provider of `default.json` — is the
+  only one `help` lists and `model` accepts.
+- Models are selected through cards in `~/.opencode-xmpp/models/`; `default.json` is
+  the card every chat starts with and the one `model default` loads. See
+  [MODEL-CARDS.md](MODEL-CARDS.md).
 - `[policy] owners` is an **access-control list for shell access**. Matching ignores
   case and the `/resource` part, so `local@example.org/phone` counts as
   `local@example.org`.
