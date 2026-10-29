@@ -234,7 +234,7 @@ def test_role_folders_split_guest_and_admin_cards(tmp_path, monkeypatch):
     _write(tmp_path / "root.json", {
         "id": "root", "name": "Root", "base_model_id": "gemma4:latest"})
     _write(tmp_path / "admin" / "admin-card.json", {
-        "id": "admin-card", "name": "Admin Card", "base_model_id": "acme/x:latest"})
+        "id": "admin-card", "name": "Admin Card", "base_model_id": "qwen3:14b"})
     _write(tmp_path / "guest" / "helper.json", {
         "id": "helper", "name": "Helper", "base_model_id": "gemma3:1b"})
 
@@ -263,7 +263,7 @@ def test_guest_help_lists_only_guest_cards(tmp_path, monkeypatch):
     _write(tmp_path / "default.json", {
         "id": "shared", "name": "Shared", "base_model_id": "gemma4:latest"})
     _write(tmp_path / "admin" / "admin-card.json", {
-        "id": "admin-card", "name": "Admin Card", "base_model_id": "acme/x:latest"})
+        "id": "admin-card", "name": "Admin Card", "base_model_id": "qwen3:14b"})
     _write(tmp_path / "guest" / "helper.json", {
         "id": "helper", "name": "Helper", "base_model_id": "gemma3:1b"})
 
@@ -286,7 +286,7 @@ def test_guest_can_only_select_guest_cards(tmp_path, monkeypatch):
     (tmp_path / "admin").mkdir()
     (tmp_path / "guest").mkdir()
     _write(tmp_path / "admin" / "admin-card.json", {
-        "id": "admin-card", "name": "Admin Card", "base_model_id": "acme/x:latest"})
+        "id": "admin-card", "name": "Admin Card", "base_model_id": "qwen3:14b"})
     _write(tmp_path / "guest" / "helper.json", {
         "id": "helper", "name": "Helper", "base_model_id": "gemma3:1b"})
 

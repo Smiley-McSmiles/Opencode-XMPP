@@ -47,8 +47,8 @@ _OPTIONS: dict[str, type] = {
 class Card:
     id: str
     name: str
-    base_model: str          # OpenCode model ID, e.g. ollama/acme/gemma4:latest
-    base_id: str             # provider model ID, e.g. acme/gemma4:latest
+    base_model: str          # OpenCode model ID, e.g. ollama/qwen3:14b
+    base_id: str             # provider model ID, e.g. qwen3:14b
     system: str
     think: bool | None
     num_ctx: int | None
