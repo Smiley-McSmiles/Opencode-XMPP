@@ -277,8 +277,14 @@ def _friendly_error(stderr: str, events: list[str]) -> str:
         return "opencode is not authenticated for that model provider."
     if "session" in text and ("not found" in text or "invalid" in text):
         return "The opencode session could not be opened."
-    if "context" in text and ("too long" in text or "limit" in text):
-        return "That conversation is too long for the model to continue."
+    if "invalid image" in text or "image input" in text:
+        return ("The model rejected that image. Ollama accepts JPEG and PNG; "
+                "convert a GIF/WebP or send a smaller JPEG.")
+    if "context" in text and ("exceed" in text or "too long" in text
+                              or "limit" in text or "context size" in text):
+        return ("That request is too long for the model's context window. "
+                "Raise params.num_ctx on the model card, send clear to start over, "
+                "or send a smaller image.")
     if "rate limit" in text or "429" in text:
         return "The model provider is rate limiting right now. Try again shortly."
     if "not found" in text or "unknown model" in text or ("model" in text and "error" in text):

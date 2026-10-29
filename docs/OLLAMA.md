@@ -217,6 +217,16 @@ An image larger than `max_inline_image_mb` is not attached; the model is told th
 image was too large. Guest senders get the image attached too, but never the host
 path.
 
+**Images and context.** A photo adds roughly 1,000–2,000 tokens. A card that leaves
+`num_ctx` unset runs on Ollama's 4096 default and will fail with
+`request (…) exceeds the available context size (4096 tokens)`. That is not a
+vision problem: raise `params.num_ctx` on the card (8192 minimum, 32768 or 65536
+comfortable) and reselect it (`model <card-id>`).
+
+**Formats.** Ollama's vision input accepts JPEG and PNG. A GIF/WebP is passed through
+by the bridge but rejected by Ollama with `invalid image input`; send a JPEG/PNG
+instead.
+
 ## 7. Audio and voice notes
 
 The bridge recognises `.m4a`, `.mp3`, `.ogg`, `.opus`, `.wav`, `.flac`, `.webm` and

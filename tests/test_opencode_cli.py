@@ -266,6 +266,9 @@ def test_context_reads_the_data_wrapper(fake):
     ("", ["not authenticated"], "not authenticated"),
     ("", ["session not found"], "could not be opened"),
     ("", ["context too long"], "too long"),
+    ("", ["request (4461 tokens) exceeds the available context size (4096 tokens)"],
+     "context window"),
+    ("", ["invalid image input"], "JPEG and PNG"),
     ("", ["rate limit exceeded"], "rate limiting"),
     ("something else", [], "could not complete"),
 ])
