@@ -280,6 +280,7 @@ cost a turn. Full reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 | `sessions` | anyone, DM | List this contact's OpenCode sessions, numbered |
 | `session <number\|id>` | anyone, DM | Continue one of those sessions |
 | `close <number\|id>` | anyone, DM | Delete one of those sessions |
+| `compact` | anyone, DM | Ask opencode to compact this chat's session now |
 | `restart` | owner, DM | Acknowledge, then restart this bridge's systemd unit |
 | `repair [focus]` | owner, DM | Model-free diagnostics, sent as a redacted report |
 | `invite <jid>` | owner, DM | Add a contact and send a presence subscription |

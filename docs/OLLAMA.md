@@ -165,6 +165,12 @@ The bridge uses two layers:
    Every eighth answered turn, the bridge asks opencode to compact the session. `0`
    (the default) leaves everything to opencode.
 
+   You can also do it on demand in chat with:
+
+   ```text
+   compact
+   ```
+
 Time limits are per tier:
 
 ```toml

@@ -220,3 +220,29 @@ def test_session_pins_survive_a_restart(tmp_path):
 
     pins.set("local@example.org", "")
     assert storage.SessionPins(path).get("local@example.org") == ""
+
+
+def test_compact_is_a_bare_command():
+    assert approvals.compact_command("compact")
+    assert approvals.compact_command("compact:") is True
+    assert approvals.compact_command("compact now") is False
+    assert approvals.close_command("compact") is None
+
+
+def test_compact_asks_opencode_for_the_active_session(monkeypatch):
+    chat = botmod._Chat(session_pin="ses_chosen")
+    fake, replies = _fake_bridge(chat)
+    calls = []
+
+    def fake_compact(settings, session_id):
+        calls.append(session_id)
+        return True
+
+    monkeypatch.setattr(cli, "compact", fake_compact)
+    asyncio.run(botmod.Bridge._handle_compact(fake, chat_key, {}))
+    assert calls == ["ses_chosen"]
+    assert "Compaction requested for session ses_chosen" in replies[-1]
+
+    monkeypatch.setattr(cli, "compact", lambda settings, session_id: False)
+    asyncio.run(botmod.Bridge._handle_compact(fake, chat_key, {}))
+    assert "couldn't compact" in replies[-1]

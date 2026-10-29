@@ -651,6 +651,9 @@ class Bridge(slixmpp.ClientXMPP):
             if close_arg is not None:
                 asyncio.create_task(self._handle_close(key, item, close_arg))
                 return
+            if approvals.compact_command(text):
+                asyncio.create_task(self._handle_compact(key, item))
+                return
             # Everyone may see their own card menu and pick from the cards their
             # tier is allowed to use; the guest agent still enforces read-only.
             if approvals.help_command(text):
@@ -1072,7 +1075,8 @@ class Bridge(slixmpp.ClientXMPP):
             current += f" (card: {card.name})"
         lines = [f"Commands ({role}):", "  stop", "  help",
                  "  model <card-id>", "  model default",
-                 "  sessions", "  session <number|id>", "  close <number|id>"]
+                 "  sessions", "  session <number|id>", "  close <number|id>",
+                 "  compact"]
         if tier == OWNER:
             lines += [
                 "  think-off / think-on  (saved to the active card)",
@@ -1160,6 +1164,25 @@ class Bridge(slixmpp.ClientXMPP):
                 f"to {self._allowed_provider()} models.")
             return
         await self._select_card(key, item, chat, card)
+
+    async def _handle_compact(self, key: str, item: dict) -> None:
+        """``compact``: ask opencode to compact this chat's session now."""
+        chat = self._chats.setdefault(key, _Chat())
+        tier = tier_for(key, self.cfg.policy.owners)
+        session_id = self._session_id(key, chat, tier)
+        settings = _settings_for(self.cfg, self.cfg.admin if tier == OWNER else self.cfg.guest)
+        ok = await asyncio.to_thread(cli.compact, settings, session_id)
+        if not ok:
+            await self._reply(
+                key, item,
+                "I couldn't compact that session. If you haven't sent a message yet, "
+                "there is no context to compact.")
+            return
+        log.info("%s requested compaction of %s", key, session_id)
+        await self._reply(
+            key, item,
+            f"Compaction requested for session {session_id}. "
+            "opencode will fold the history at its next safe point.")
 
     async def _handle_sessions(self, key: str, item: dict) -> None:
         """``sessions``: list the OpenCode sessions this contact owns."""

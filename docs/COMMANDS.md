@@ -14,6 +14,7 @@ broken.
 | [`sessions`](#sessions--session--close) | anyone | DM | List this contact's sessions, numbered |
 | [`session`](#sessions--session--close) | anyone | DM | Continue one of those sessions |
 | [`close`](#sessions--session--close) | anyone | DM | Delete one of those sessions |
+| [`compact`](#compact) | anyone | DM | Ask opencode to compact the session now |
 | [`repair`](#repair) | owner | DM | Model-free diagnostics |
 | [`restart`](#restart) | owner | DM | Restart this bridge's unit |
 | [`invite`](#invite) | owner | DM | Add a contact |
@@ -148,6 +149,23 @@ a restart or a model switch no longer creates a second transcript. The commands 
 find sessions made by older builds (the old scoped ids) so you can move to or delete
 them. On the first message after the upgrade, if the new session does not exist yet,
 the newest old one is adopted automatically rather than starting an empty transcript.
+
+## compact
+
+```text
+compact
+```
+
+Asks opencode to compact the active session now, instead of waiting for
+`[opencode] compact_after_turns` or opencode's automatic threshold:
+
+```text
+Compaction requested for session ses_… . opencode will fold the history at its next safe point.
+```
+
+It uses the session you are currently in (the pinned one, or the derived one) and does
+not switch or delete anything. If the chat has not sent a message yet there is nothing
+to compact, and the reply says so.
 
 ## clear
 

@@ -23,6 +23,7 @@ CLEAR_WORDS = frozenset({"clear"})
 SESSIONS_WORDS = frozenset({"sessions"})
 SESSION_WORDS = frozenset({"session"})
 CLOSE_WORDS = frozenset({"close"})
+COMPACT_WORDS = frozenset({"compact"})
 THINK_COMMANDS = {
     "think-off": "off",
     "think_off": "off",
@@ -99,6 +100,12 @@ def _session_argument(text: str, words: frozenset[str]) -> str | None:
 def session_command(text: str) -> str | None:
     """``2``/``ses_...`` from ``session <n|id>``, ``""`` bare, else None."""
     return _session_argument(text, SESSION_WORDS)
+
+
+def compact_command(text: str) -> bool:
+    """True for the bare ``compact`` command."""
+    tokens = (text or "").split()
+    return len(tokens) == 1 and tokens[0].lower().rstrip(":,") in COMPACT_WORDS
 
 
 def close_command(text: str) -> str | None:
