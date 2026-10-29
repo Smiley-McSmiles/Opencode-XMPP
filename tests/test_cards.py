@@ -298,3 +298,14 @@ def test_guest_can_only_select_guest_cards(tmp_path, monkeypatch):
     asyncio.run(botmod.Bridge._handle_model(fake, "remote@example.org", {}, "helper"))
     assert fake._chats["remote@example.org"].card.id == "helper"
     assert fake._chats["remote@example.org"].model_override == "ollama/gemma3:1b"
+
+
+def test_ensure_dirs_creates_the_role_shelves(tmp_path):
+    root = tmp_path / "models"
+    created = cards.ensure_dirs(root)
+    assert (root / "admin").is_dir()
+    assert (root / "guest").is_dir()
+    assert set(created) == {root, root / "admin", root / "guest"}
+    assert (root / "guest").stat().st_mode & 0o777 == 0o700
+    # A second call changes nothing and creates nothing.
+    assert cards.ensure_dirs(root) == []

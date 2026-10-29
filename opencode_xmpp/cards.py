@@ -135,6 +135,26 @@ def default_path(directory: Path | None = None) -> Path:
     return root / DEFAULT_NAME
 
 
+def ensure_dirs(directory: Path | None = None) -> list[Path]:
+    """Create ``models/``, ``models/admin/`` and ``models/guest/`` when missing.
+
+    Returns the folders that were created. Existing folders are left alone, so a
+    deliberate permission change is not overwritten.
+    """
+    root = Path(directory) if directory is not None else default_dir()
+    created: list[Path] = []
+    for path in (root, root / "admin", root / "guest"):
+        if path.is_dir():
+            continue
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            os.chmod(path, 0o700)
+        except OSError:
+            continue
+        created.append(path)
+    return created
+
+
 def _read_default(path: Path) -> Card | None:
     if not path.is_file():
         return None

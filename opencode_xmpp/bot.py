@@ -198,6 +198,12 @@ class Bridge(slixmpp.ClientXMPP):
         self._chats: dict[str, _Chat] = {}
         self._stopped = asyncio.Event()
         self._upload_host: str = ""
+        # The card shelves must exist even when the deployment skipped them.
+        try:
+            for folder in cards.ensure_dirs():
+                log.info("created model card folder %s", folder)
+        except Exception:  # noqa: BLE001 - never fail to start over a folder
+            log.warning("could not create the model card folders", exc_info=True)
         # Role-specific default cards: models/admin/default.json and
         # models/guest/default.json, each falling back to models/default.json.
         self._default_cards: dict[str, cards.Card | None] = {
