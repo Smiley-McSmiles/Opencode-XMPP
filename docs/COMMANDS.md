@@ -136,7 +136,7 @@ session <number|id> to continue one; close <number|id> to delete one.
 ```
 
 - `session <number|id>` pins the chat to that session. The next message continues its
-  context, even after a bridge restart.
+  context, and the choice is remembered in `sessions-<bot>.json` across restarts.
 - `close <number|id>` deletes one session. Closing the active one stops any turn first;
   the next message starts a fresh derived session. Closing another one leaves the
   current chat alone.

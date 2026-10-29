@@ -24,7 +24,7 @@ from pathlib import Path
 import slixmpp
 from slixmpp import JID
 
-from . import approvals, cards, diagnostics, omemo, opencode_cli as cli, reactions, uploads
+from . import approvals, cards, diagnostics, omemo, opencode_cli as cli, reactions, storage, uploads
 from .chunk import split_message
 from .config import Config, Tier, read_secret
 from .policy import (GUEST, OWNER, RateLimiter, bare_jid, is_ignored,
@@ -215,6 +215,8 @@ class Bridge(slixmpp.ClientXMPP):
         # Cards already written into opencode's config this process.
         self._applied_cards: set[tuple[str, str]] = set()
         _instance = bare_jid(cfg.account.jid).split('@', 1)[0]
+        self._pins = storage.SessionPins(
+            Path(cfg.features.omemo_storage).expanduser().with_name(f"sessions-{_instance}.json"))
         self._pending = approvals.PendingStore(
             Path(cfg.features.omemo_storage).expanduser().with_name(f"pending-{_instance}.json"))
         self._spool = Path(cfg.features.spool_dir).expanduser()
@@ -1201,6 +1203,7 @@ class Bridge(slixmpp.ClientXMPP):
         chat.session_pin = entry["id"]
         chat.session_ids.add(entry["id"])
         chat.session_id = entry["id"]
+        self._pins.set(key, entry["id"])
         log.info("%s switched to session %s", key, entry["id"])
         await self._reply(
             key, item,
@@ -1245,8 +1248,9 @@ class Bridge(slixmpp.ClientXMPP):
             await self._reply(key, item, f"I couldn't close {session_id}: {detail}")
             return
         chat.session_ids.discard(session_id)
-        if chat.session_pin == session_id:
+        if chat.session_pin == session_id or self._pins.get(key) == session_id:
             chat.session_pin = ""
+            self._pins.set(key, "")
         if chat.session_id == session_id:
             chat.session_id = ""
         log.info("%s closed session %s", key, session_id)
@@ -1309,6 +1313,7 @@ class Bridge(slixmpp.ClientXMPP):
             else:
                 chat.session_ids.clear()
                 chat.session_pin = ""
+                self._pins.set(key, "")
                 log.info("cleared context for %s (%d session(s))", key, deleted)
                 await self._reply(
                     key, item,
@@ -1409,8 +1414,10 @@ class Bridge(slixmpp.ClientXMPP):
         accepts a new model on an existing session, so a person keeps one
         transcript and a restart cannot strand them in a second one.
         """
-        if chat.session_pin:
-            return chat.session_pin
+        pin = chat.session_pin or self._pins.get(key)
+        if pin:
+            chat.session_pin = pin
+            return pin
         return session_id_for(self.cfg.account.jid, key,
                               self.cfg.policy.session_id_version)
 
@@ -1489,8 +1496,12 @@ class Bridge(slixmpp.ClientXMPP):
         such sessions and the new unscoped one does not exist yet, adopt the
         newest so the upgrade does not silently start an empty transcript.
         """
-        if chat.session_checked or chat.session_pin:
+        pin = chat.session_pin or self._pins.get(key)
+        if pin:
+            chat.session_pin = pin
             chat.session_checked = True
+            return
+        if chat.session_checked:
             return
         chat.session_checked = True
         try:
@@ -1504,6 +1515,7 @@ class Bridge(slixmpp.ClientXMPP):
         if found:
             chat.session_pin = found[0]["id"]
             chat.session_ids.add(chat.session_pin)
+            self._pins.set(key, chat.session_pin)
             log.info("%s adopted the most recent legacy session %s", key, chat.session_pin)
 
     async def _handle_turn(self, key: str, chat: _Chat, item: dict) -> None:

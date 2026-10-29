@@ -55,3 +55,38 @@ class JSONFileStorage(Storage):
             os.fsync(handle.fileno())
         os.replace(tmp, self.path)
         os.chmod(self.path, 0o600)
+
+
+class SessionPins:
+    """contact -> the opencode session they chose, surviving restarts."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(os.path.expanduser(str(path)))
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._data: dict[str, str] = {}
+        if self.path.exists():
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                data = {}
+            if isinstance(data, dict):
+                self._data = {str(k): str(v) for k, v in data.items() if v}
+
+    def get(self, contact: str) -> str:
+        return self._data.get(contact, "")
+
+    def set(self, contact: str, session_id: str) -> None:
+        if session_id:
+            self._data[contact] = session_id
+        else:
+            self._data.pop(contact, None)
+        self._flush()
+
+    def _flush(self) -> None:
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(self._data, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(tmp, self.path)
+        os.chmod(self.path, 0o600)

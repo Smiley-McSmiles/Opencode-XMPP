@@ -25,6 +25,7 @@ def _fake_bridge(chat, found=None):
                                   auto_approve=True, timeout_s=180),
         ),
         _chats={chat_key: chat} if chat else {},
+        _pins=Pins(),
         _reply=reply,
         _session_id=lambda key, chat, tier: chat.session_pin or "ses_derived",
         _existing_sessions=lambda key, chat, tier: list(found or []),
@@ -35,6 +36,20 @@ def _fake_bridge(chat, found=None):
 
 
 chat_key = "local@example.org"
+
+
+class Pins:
+    def __init__(self):
+        self.data = {}
+
+    def get(self, key):
+        return self.data.get(key, "")
+
+    def set(self, key, session_id):
+        if session_id:
+            self.data[key] = session_id
+        else:
+            self.data.pop(key, None)
 
 
 def _entry(sid, title="Chat", updated=1_700_000_000_000):
@@ -59,10 +74,11 @@ def test_session_commands_are_strict():
 
 def test_one_session_per_contact_regardless_of_model_or_card():
     fake = SimpleNamespace(
+        _pins=Pins(),
         cfg=SimpleNamespace(
             account=SimpleNamespace(jid="bot@example.org"),
             policy=SimpleNamespace(session_id_version="2"),
-        )
+        ),
     )
     first = botmod._Chat(card=SimpleNamespace(id="one"), model_override="ollama/a")
     second = botmod._Chat(card=SimpleNamespace(id="two"), model_override="ollama/b")
@@ -163,6 +179,7 @@ def test_list_sessions_parses_the_json_output(monkeypatch):
 
 def test_first_turn_adopts_the_newest_legacy_session(monkeypatch):
     fake = SimpleNamespace(
+        _pins=Pins(),
         cfg=SimpleNamespace(
             account=SimpleNamespace(jid="bot@example.org"),
             policy=SimpleNamespace(session_id_version="2"),
@@ -179,6 +196,7 @@ def test_first_turn_adopts_the_newest_legacy_session(monkeypatch):
 def test_first_turn_keeps_the_derived_session_when_it_exists():
     derived = session_id_for("bot@example.org", "local@example.org", "2")
     fake = SimpleNamespace(
+        _pins=Pins(),
         cfg=SimpleNamespace(
             account=SimpleNamespace(jid="bot@example.org"),
             policy=SimpleNamespace(session_id_version="2"),
@@ -189,3 +207,16 @@ def test_first_turn_keeps_the_derived_session_when_it_exists():
     chat = botmod._Chat()
     asyncio.run(fake._adopt_legacy_session("local@example.org", chat, "owner"))
     assert chat.session_pin == ""
+
+
+def test_session_pins_survive_a_restart(tmp_path):
+    from opencode_xmpp import storage
+
+    path = tmp_path / "sessions.json"
+    pins = storage.SessionPins(path)
+    pins.set("local@example.org", "ses_chosen")
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert storage.SessionPins(path).get("local@example.org") == "ses_chosen"
+
+    pins.set("local@example.org", "")
+    assert storage.SessionPins(path).get("local@example.org") == ""
