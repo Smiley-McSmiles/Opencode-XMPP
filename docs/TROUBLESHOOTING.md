@@ -114,8 +114,8 @@ audio-capable model. See [OLLAMA.md](OLLAMA.md).
    grep -A6 '"options"' ~/.config/opencode/opencode.jsonc
    ```
 
-2. Lower `params.num_ctx` if it does not fit in memory. A 64k context is expensive
-   even when the conversation is short.
+2. Lower `OLLAMA_CONTEXT_LENGTH` (and the card's `num_ctx`) if the context does not
+   fit in memory. A 64k context is expensive even when the conversation is short.
 3. Enable the compaction safety net:
 
    ```toml

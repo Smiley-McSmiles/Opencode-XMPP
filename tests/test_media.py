@@ -158,3 +158,23 @@ def test_sniff_extension_recognizes_audio():
     assert uploads.sniff_extension(b"ID3\x04\x00") == ".mp3"
     assert uploads.sniff_extension(b"RIFF\x00\x00\x00\x00WAVEfmt ") == ".wav"
     assert uploads.sniff_extension(b"OggS\x00") == ".ogg"
+
+
+def test_to_png_without_a_converter(monkeypatch):
+    from opencode_xmpp import uploads
+
+    monkeypatch.setattr(uploads.shutil, "which", lambda name: None)
+    assert uploads.to_png(__import__("pathlib").Path("missing.gif")) is None
+
+
+def test_to_png_converts_a_gif(tmp_path):
+    from opencode_xmpp import uploads
+
+    if not (uploads.shutil.which("magick") or uploads.shutil.which("convert")):
+        pytest.skip("ImageMagick is not installed")
+    gif = tmp_path / "tiny.gif"
+    gif.write_bytes(base64.b64decode("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="))
+    out = uploads.to_png(gif)
+    assert out is not None
+    assert out.suffix == ".png"
+    assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

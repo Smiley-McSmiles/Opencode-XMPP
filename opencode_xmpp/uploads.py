@@ -29,6 +29,8 @@ import logging
 import mimetypes
 import os
 import re
+import shutil
+import subprocess
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -159,6 +161,27 @@ def _decrypt_aesgcm(blob: bytes, material: bytes) -> bytes:
                                  iv_len, start, trim, "material" if tag else "file")
                     return plain
     raise ValueError(f"unexpected encrypted-media key length {len(material)}")
+
+
+def to_png(path: Path, timeout: float = 20.0) -> Path | None:
+    """A PNG copy of an image Ollama will not take directly (GIF/WebP).
+
+    Uses ImageMagick (``magick`` or ``convert``) when installed and returns the
+    new path, or None when no converter is available or it fails. Animated images
+    become their first frame.
+    """
+    tool = shutil.which("magick") or shutil.which("convert")
+    if tool is None:
+        return None
+    target = path.with_suffix(".png")
+    try:
+        result = subprocess.run([tool, f"{path}[0]", str(target)],
+                                capture_output=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0 or not target.is_file() or target.stat().st_size == 0:
+        return None
+    return target
 
 
 def sniff_extension(data: bytes) -> str:

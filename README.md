@@ -190,7 +190,7 @@ plus a `params` object, and that is exactly what the bridge reads:
 | `base_model_id` | Ollama model to run. `gemma4:26b-64k` or `ollama/gemma4:26b-64k` both work; `null` (Open WebUI's base-model export) uses the card `id`. |
 | `params.system` | Persona for the chat. `{{char}}` → card name, `{{user}}` → sender's local part. |
 | `params.think` | `true`/`false` → Ollama reasoning on/off for this model. |
-| `params.num_ctx` | Context window → OpenCode `limit.context` **and** Ollama request `options.num_ctx`. |
+| `params.num_ctx` | OpenCode's budget (`limit.context`). It does **not** change Ollama's context; raise that with `OLLAMA_CONTEXT_LENGTH`. |
 | `params.temperature`, `top_p`, `top_k`, `min_p`, `typical_p`, `tfs_z`, `repeat_last_n`, `repeat_penalty`, `presence_penalty`, `frequency_penalty`, `mirostat*`, `num_keep`, `num_predict`, `max_tokens`, `num_batch`, `seed`, `stop` | Passed as Ollama request options. |
 
 Cards are per-chat: `model gemma-local` switches this conversation, `model default`
@@ -247,10 +247,19 @@ chat:
 compact_after_turns = 8     # ask opencode to compact every 8 answered turns
 ```
 
-and a context window that the model actually supports, set per card through
-`params.num_ctx` (it becomes both OpenCode's budget and Ollama's request option). If
-the base model's Modelfile has no `num_ctx`, the card still supplies it — no
-`ollama create` needed. More in [docs/OLLAMA.md](docs/OLLAMA.md).
+and a context window big enough for the job. Ollama's default is only 4096 tokens, so
+raise it on the service:
+
+```sh
+sudo systemctl edit ollama
+# [Service]
+# Environment="OLLAMA_CONTEXT_LENGTH=32768"
+# Environment="OLLAMA_NUM_PARALLEL=1"
+```
+
+A card's `params.num_ctx` sets OpenCode's budget; it does **not** raise Ollama's context.
+Match it to the service value so both agree. More in
+[docs/OLLAMA.md](docs/OLLAMA.md#3-context-window).
 
 ## 💬 Chat commands
 

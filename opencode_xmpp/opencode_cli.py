@@ -283,8 +283,8 @@ def _friendly_error(stderr: str, events: list[str]) -> str:
     if "context" in text and ("exceed" in text or "too long" in text
                               or "limit" in text or "context size" in text):
         return ("That request is too long for the model's context window. "
-                "Raise params.num_ctx on the model card, send clear to start over, "
-                "or send a smaller image.")
+                "Raise OLLAMA_CONTEXT_LENGTH on the Ollama service, send clear to "
+                "start over, or send a smaller image.")
     if "rate limit" in text or "429" in text:
         return "The model provider is rate limiting right now. Try again shortly."
     if "not found" in text or "unknown model" in text or ("model" in text and "error" in text):

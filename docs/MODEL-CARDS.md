@@ -188,11 +188,12 @@ Anything other than a JSON boolean is ignored.
 
 | Field | Meaning |
 | --- | --- |
-| `params.num_ctx` | Context window in tokens. Becomes both `limit.context` (opencode's budget) and `body.options.num_ctx` (what Ollama actually allocates). |
+| `params.num_ctx` | opencode's budget and compaction threshold (`limit.context`). It is also sent as a request option, but opencode's built-in Ollama provider does not forward it, so **Ollama's own context does not change**. |
 
-A photo costs tokens (often 1,000–2,000 before any text). A card with no `num_ctx` gets
-Ollama's 4096 default, which is usually too small for an image turn. Set at least
-`8192`, or `32768`/`65536` for comfort.
+A photo costs tokens (often 1,000–2,000 before any text). Ollama's default context is
+4096, which is usually too small for an image turn. Raise it on the Ollama service
+(`OLLAMA_CONTEXT_LENGTH=32768`) and set the card's `num_ctx` to the same value so
+opencode's budget agrees. See [OLLAMA.md](OLLAMA.md#3-context-window).
 
 ### Sampling and request options
 

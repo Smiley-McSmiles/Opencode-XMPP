@@ -1353,6 +1353,16 @@ class Bridge(slixmpp.ClientXMPP):
                 suffix = saved.suffix.lower()
                 is_image = suffix in IMAGE_MIME
                 is_audio = suffix in AUDIO_MIME
+                if is_image and suffix in (".gif", ".webp"):
+                    # Ollama's vision input takes JPEG/PNG. Convert the first
+                    # frame when ImageMagick is around instead of failing the turn.
+                    converted = await asyncio.to_thread(uploads.to_png, saved)
+                    if converted is None:
+                        notes.append("[image format not supported by the model]")
+                        continue
+                    log.info("converted %s to %s for the model", saved.name, converted.name)
+                    saved_paths.append(converted)
+                    saved, suffix = converted, ".png"
                 if (is_image or is_audio) and self.cfg.features.inline_images:
                     kind = "image" if is_image else "audio"
                     try:
