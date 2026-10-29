@@ -73,6 +73,10 @@ Who sees what:
 A guest never sees an admin card in `help` and cannot select one by guessing its id —
 selection is restricted to the same list.
 
+The bridge creates `models/`, `models/admin/` and `models/guest/` on startup when they
+are missing (mode `0700`). Existing folders are left untouched, so you can set your own
+permissions.
+
 Create the layout and drop files in:
 
 ```sh
