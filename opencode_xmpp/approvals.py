@@ -20,6 +20,9 @@ JOIN_WORDS = frozenset({"join"})
 RESTART_WORDS = frozenset({"restart"})
 REPAIR_WORDS = frozenset({"repair"})
 CLEAR_WORDS = frozenset({"clear"})
+SESSIONS_WORDS = frozenset({"sessions"})
+SESSION_WORDS = frozenset({"session"})
+CLOSE_WORDS = frozenset({"close"})
 THINK_COMMANDS = {
     "think-off": "off",
     "think_off": "off",
@@ -68,6 +71,39 @@ def clear_command(text: str) -> bool:
     """
     tokens = (text or "").split()
     return len(tokens) == 1 and tokens[0].lower().rstrip(":,") in CLEAR_WORDS
+
+
+def sessions_command(text: str) -> bool:
+    """True for the bare ``sessions`` command (list this contact's sessions)."""
+    tokens = (text or "").split()
+    return len(tokens) == 1 and tokens[0].lower().rstrip(":,") in SESSIONS_WORDS
+
+
+def _session_argument(text: str, words: frozenset[str]) -> str | None:
+    """The number/id after ``session``/``close``, or None when it is just chat.
+
+    Only a number or an opencode session id counts, so "close the window" and
+    "session tonight" stay ordinary messages for the model.
+    """
+    tokens = (text or "").split()
+    if not tokens or tokens[0].lower().rstrip(":,") not in words:
+        return None
+    if len(tokens) == 1:
+        return ""
+    argument = tokens[1].strip().rstrip(".,")
+    if argument.isdigit() or argument.startswith("ses_"):
+        return argument
+    return None
+
+
+def session_command(text: str) -> str | None:
+    """``2``/``ses_...`` from ``session <n|id>``, ``""`` bare, else None."""
+    return _session_argument(text, SESSION_WORDS)
+
+
+def close_command(text: str) -> str | None:
+    """``2``/``ses_...`` from ``close <n|id>``, ``""`` bare, else None."""
+    return _session_argument(text, CLOSE_WORDS)
 
 
 def restart_command(text: str) -> bool:

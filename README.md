@@ -66,9 +66,11 @@ bridge is a **transport**: it turns an XMPP message into
 `opencode run --session <derived-id> --agent <tier>` and returns the answer.
 
 One conversation per person, not per device. The session id is *derived* from the
-bot JID and the sender's bare JID, so a restart, a reinstall or a lost state file
-cannot fork someone into a second conversation — and a phone, a laptop and a
-desktop share one transcript.
+bot JID and the sender's bare JID — no model or card scope — so a restart, a model
+switch, a reinstall or a lost state file cannot fork someone into a second
+conversation, and a phone, a laptop and a desktop share one transcript. If an older
+build left extra sessions, `sessions` lists them, `session <n>` continues one and
+`close <n>` deletes one.
 
 ## ✨ Features
 
@@ -194,10 +196,11 @@ plus a `params` object, and that is exactly what the bridge reads:
 | `params.temperature`, `top_p`, `top_k`, `min_p`, `typical_p`, `tfs_z`, `repeat_last_n`, `repeat_penalty`, `presence_penalty`, `frequency_penalty`, `mirostat*`, `num_keep`, `num_predict`, `max_tokens`, `num_batch`, `seed`, `stop` | Passed as Ollama request options. |
 
 Cards are per-chat: `model gemma-local` switches this conversation, `model default`
-loads `default.json`, and each card gets its own session so an old context is never
-replayed into a model that cannot load it. `think-off` / `think-on` edit the active
-card's JSON — no `ollama create`, no second copy of the model. The big `meta` blob
-Open WebUI adds (base64 images, descriptions) is ignored. A ready-to-copy example
+loads `default.json`, and switching cards keeps the same conversation — opencode 2.2
+accepts a new model on an existing session, so a contact has **one session**, not one
+per card. `think-off` / `think-on` edit the active card's JSON — no `ollama create`, no
+second copy of the model. The big `meta` blob Open WebUI adds (base64 images,
+descriptions) is ignored. A ready-to-copy example
 lives in [`examples/models/default.json`](examples/models/default.json) (a base-model
 export) and [`examples/models/gemma-local.json`](examples/models/gemma-local.json) (a
 persona). Card files are always written back with two-space indentation and one field
@@ -274,6 +277,9 @@ cost a turn. Full reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 | `model default` | anyone, DM | Load the role's `default.json` for this chat |
 | `think-off` / `think-on` | owner, DM | Save the reasoning toggle to the active card's JSON |
 | `clear` | anyone, DM | Stop the turn and delete every known OpenCode session for this contact |
+| `sessions` | anyone, DM | List this contact's OpenCode sessions, numbered |
+| `session <number\|id>` | anyone, DM | Continue one of those sessions |
+| `close <number\|id>` | anyone, DM | Delete one of those sessions |
 | `restart` | owner, DM | Acknowledge, then restart this bridge's systemd unit |
 | `repair [focus]` | owner, DM | Model-free diagnostics, sent as a redacted report |
 | `invite <jid>` | owner, DM | Add a contact and send a presence subscription |

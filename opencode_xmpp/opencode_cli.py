@@ -223,6 +223,35 @@ def _api_get(settings: RunSettings, path: str, timeout: float = 15.0) -> dict | 
         return None
 
 
+def list_sessions(settings: RunSettings, timeout: float = 20.0) -> list[dict]:
+    """Top-level opencode sessions in the configured workspace, newest first."""
+    binary = find_binary(settings)
+    if not binary:
+        raise CLIError("The opencode CLI is not installed or not on PATH.",
+                       f"binary {settings.binary!r}")
+    env = os.environ.copy()
+    env.setdefault("HOME", str(Path.home()))
+    for key, value in settings.env:
+        env[str(key)] = str(value)
+    try:
+        result = subprocess.run(
+            [binary, "session", "list", "--format", "json", "--max-count", "500"],
+            cwd=_workspace(settings), env=env, capture_output=True, text=True,
+            timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise CLIError("I couldn't list the sessions.", str(exc)) from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()[:500]
+        raise CLIError("I couldn't list the sessions.", detail)
+    try:
+        data = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict) and item.get("id")]
+
+
 def delete_session(settings: RunSettings, session_id: str, timeout: float = 30.0) -> tuple[bool, str]:
     """Delete one opencode session (and its children) as the bridge user.
 

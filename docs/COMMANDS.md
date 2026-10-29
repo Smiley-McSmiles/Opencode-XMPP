@@ -11,6 +11,9 @@ broken.
 | [`model`](#model) | anyone | DM | Switch this chat to a card (guests: guest cards) |
 | [`think-off` / `think-on`](#thinking) | owner | DM | Save reasoning on/off in the active card |
 | [`clear`](#clear) | anyone | DM | Delete this contact's OpenCode sessions |
+| [`sessions`](#sessions--session--close) | anyone | DM | List this contact's sessions, numbered |
+| [`session`](#sessions--session--close) | anyone | DM | Continue one of those sessions |
+| [`close`](#sessions--session--close) | anyone | DM | Delete one of those sessions |
 | [`repair`](#repair) | owner | DM | Model-free diagnostics |
 | [`restart`](#restart) | owner | DM | Restart this bridge's unit |
 | [`invite`](#invite) | owner | DM | Add a contact |
@@ -79,9 +82,10 @@ and sampling settings live.
 there is no default card, the chat goes back to `[admin]`/`[guest] model` and the reply
 says so.
 
-Switching is per chat and per card: each selection gets its own OpenCode session, so
-a context created for one model is never replayed into another. The selection is
-forgotten when the bridge restarts, and every chat starts on its tier's default card.
+Switching is per chat and **keeps one session**: opencode 2.2 accepts a new model on an
+existing session, so a contact owns exactly one transcript. The selection is forgotten
+when the bridge restarts, and every chat starts on its tier's default card. Use `clear`
+for a fresh conversation.
 
 Guests selecting a card changes only which model/persona answers them; the guest agent
 still has no shell, no edits and no subagents.
@@ -112,23 +116,51 @@ instead if you prefer — `"params": { "think": false }` is the same thing.
 There is no active card to edit only when the bridge runs without `default.json` and no
 card has been selected; the reply says so.
 
+## sessions / session / close
+
+```text
+sessions
+session 2
+session ses_0123456789abcdef0123456789
+close 2
+```
+
+`sessions` lists the OpenCode sessions **this contact owns**, newest first:
+
+```text
+Sessions:
+  1. ses_0123456789abcdef0123456789  "Story chat"  2026-10-28 20:31  [active]
+  2. ses_fedcba9876543210fedcba987654  "Greeting"      2026-10-28 20:13
+
+session <number|id> to continue one; close <number|id> to delete one.
+```
+
+- `session <number|id>` pins the chat to that session. The next message continues its
+  context, even after a bridge restart.
+- `close <number|id>` deletes one session. Closing the active one stops any turn first;
+  the next message starts a fresh derived session. Closing another one leaves the
+  current chat alone.
+- Only sessions that belong to the sender are listed or accepted, so a guessed id from
+  another contact is refused.
+
+The bridge now derives **one session per (bot, contact)** — no model or card scope — so
+a restart or a model switch no longer creates a second transcript. The commands still
+find sessions made by older builds (the old scoped ids) so you can move to or delete
+them. On the first message after the upgrade, if the new session does not exist yet,
+the newest old one is adopted automatically rather than starting an empty transcript.
+
 ## clear
 
 ```text
 clear
 ```
 
-The "start over" command. It:
-
-1. stops any turn in flight,
-2. deletes every OpenCode session it knows for **you** — the default model's, the
-   active model's, the active card's, and any scoped session used earlier in this
-   process,
-3. leaves the chat ready for a new conversation.
+The "start over" command. It stops any turn in flight, deletes **every** session it can
+find for you (current, pinned, previously used and old scoped ones), and lets the next
+message start fresh.
 
 It only ever touches the sender's own sessions. It cannot see or delete another
-contact's context. `clear` also deletes the session for guests, who can use it to start
-fresh.
+contact's context.
 
 ## repair
 

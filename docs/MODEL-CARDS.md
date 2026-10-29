@@ -289,8 +289,8 @@ model default
 loads `default.json` (or, if there is none, resets the chat to `[admin] model`).
 
 Model and card selections are **per chat** and are forgotten when the bridge
-restarts. Each selection also gets its own OpenCode session, so switching models does
-not try to continue a context created for another model.
+restarts. Switching models keeps the same OpenCode session, so the conversation is not
+forked; `sessions` / `session` / `close` manage the rare extra transcript.
 
 ## How it is applied
 

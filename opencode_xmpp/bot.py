@@ -120,6 +120,8 @@ class _Chat:
     clearing: bool = False    # a ``clear`` is deleting this chat's session
     model_override: str = ""  # per-chat ``model`` selection
     card: cards.Card | None = None  # active model card for this chat
+    session_pin: str = ""            # ``session`` selection; empty = the derived one
+    session_checked: bool = False    # looked for a legacy session on the first turn
     session_ids: set[str] = field(default_factory=set)  # every session used here
 
 
@@ -636,6 +638,17 @@ class Bridge(slixmpp.ClientXMPP):
             if approvals.clear_command(text):
                 asyncio.create_task(self._handle_clear(key, item))
                 return
+            if approvals.sessions_command(text):
+                asyncio.create_task(self._handle_sessions(key, item))
+                return
+            session_arg = approvals.session_command(text)
+            if session_arg is not None:
+                asyncio.create_task(self._handle_session(key, item, session_arg))
+                return
+            close_arg = approvals.close_command(text)
+            if close_arg is not None:
+                asyncio.create_task(self._handle_close(key, item, close_arg))
+                return
             # Everyone may see their own card menu and pick from the cards their
             # tier is allowed to use; the guest agent still enforces read-only.
             if approvals.help_command(text):
@@ -1056,7 +1069,8 @@ class Bridge(slixmpp.ClientXMPP):
         if card is not None:
             current += f" (card: {card.name})"
         lines = [f"Commands ({role}):", "  stop", "  help",
-                 "  model <card-id>", "  model default"]
+                 "  model <card-id>", "  model default",
+                 "  sessions", "  session <number|id>", "  close <number|id>"]
         if tier == OWNER:
             lines += [
                 "  think-off / think-on  (saved to the active card)",
@@ -1145,6 +1159,100 @@ class Bridge(slixmpp.ClientXMPP):
             return
         await self._select_card(key, item, chat, card)
 
+    async def _handle_sessions(self, key: str, item: dict) -> None:
+        """``sessions``: list the OpenCode sessions this contact owns."""
+        chat = self._chats.get(key) or _Chat()
+        tier = tier_for(key, self.cfg.policy.owners)
+        try:
+            found = await asyncio.to_thread(self._existing_sessions, key, chat, tier)
+        except cli.CLIError as exc:
+            await self._reply(key, item, f"I couldn't list the sessions: {exc.user_message}")
+            return
+        active = self._session_id(key, chat, tier)
+        if not found:
+            await self._reply(
+                key, item,
+                "No OpenCode sessions for this contact yet. Your next message starts one.")
+            return
+        lines = ["Sessions:"]
+        for index, entry in enumerate(found, 1):
+            lines.append(f"  {index}. {self._describe_session(entry, entry['id'] == active)}")
+        lines += ["", "session <number|id> to continue one; close <number|id> to delete one."]
+        await self._reply(key, item, "\n".join(lines))
+
+    async def _handle_session(self, key: str, item: dict, argument: str) -> None:
+        """``session <n|id>``: continue one of this contact's sessions."""
+        chat = self._chats.setdefault(key, _Chat())
+        tier = tier_for(key, self.cfg.policy.owners)
+        if not argument:
+            await self._reply(
+                key, item, "Usage: session <number|id>. Send sessions to list them.")
+            return
+        try:
+            found = await asyncio.to_thread(self._existing_sessions, key, chat, tier)
+        except cli.CLIError as exc:
+            await self._reply(key, item, f"I couldn't list the sessions: {exc.user_message}")
+            return
+        entry = self._resolve_session(found, argument)
+        if entry is None:
+            await self._reply(
+                key, item, f"No session {argument!r} for this contact. Send sessions to list them.")
+            return
+        chat.session_pin = entry["id"]
+        chat.session_ids.add(entry["id"])
+        chat.session_id = entry["id"]
+        log.info("%s switched to session %s", key, entry["id"])
+        await self._reply(
+            key, item,
+            f"This chat now continues session {entry['id']}. "
+            "The next message picks up that context.")
+
+    async def _handle_close(self, key: str, item: dict, argument: str) -> None:
+        """``close <n|id>``: delete one of this contact's sessions."""
+        chat = self._chats.setdefault(key, _Chat())
+        tier = tier_for(key, self.cfg.policy.owners)
+        if not argument:
+            await self._reply(
+                key, item, "Usage: close <number|id>. Send sessions to list them.")
+            return
+        try:
+            found = await asyncio.to_thread(self._existing_sessions, key, chat, tier)
+        except cli.CLIError as exc:
+            await self._reply(key, item, f"I couldn't list the sessions: {exc.user_message}")
+            return
+        entry = self._resolve_session(found, argument)
+        if entry is None:
+            await self._reply(
+                key, item, f"No session {argument!r} for this contact. Send sessions to list them.")
+            return
+        session_id = entry["id"]
+        settings = _settings_for(self.cfg, self.cfg.admin if tier == OWNER else self.cfg.guest)
+        active = session_id == self._session_id(key, chat, tier)
+        if active and chat.task is not None and not chat.task.done():
+            chat.suppress = True
+            chat.pending.clear()
+            self._interrupt(chat)
+            try:
+                await asyncio.wait_for(asyncio.shield(chat.task), timeout=20)
+            except asyncio.TimeoutError:
+                await self._reply(
+                    key, item, "The current turn is still running; try close again in a moment.")
+                return
+            except Exception:  # noqa: BLE001 - a failed turn is settled enough
+                pass
+        ok, detail = await asyncio.to_thread(cli.delete_session, settings, session_id)
+        if not ok:
+            await self._reply(key, item, f"I couldn't close {session_id}: {detail}")
+            return
+        chat.session_ids.discard(session_id)
+        if chat.session_pin == session_id:
+            chat.session_pin = ""
+        if chat.session_id == session_id:
+            chat.session_id = ""
+        log.info("%s closed session %s", key, session_id)
+        tail = "The next message starts a fresh session." if active else "The current chat keeps its session."
+        await self._reply(key, item, f"Closed session {session_id}. {tail}")
+
     async def _handle_clear(self, key: str, item: dict) -> None:
         """Hard-clear the sender's derived OpenCode session."""
         chat = self._chats.setdefault(key, _Chat())
@@ -1173,22 +1281,15 @@ class Bridge(slixmpp.ClientXMPP):
                     return
             tier = tier_for(key, self.cfg.policy.owners)
             settings = _settings_for(self.cfg, self.cfg.admin if tier == OWNER else self.cfg.guest)
-            card = self._active_card(chat, tier)
-            default_model = (card.model if card is not None
-                             else (self.cfg.admin.model if tier == OWNER else self.cfg.guest.model))
-            models = {default_model, self.cfg.admin.model, self.cfg.guest.model,
-                      chat.model_override}
-            if chat.card is not None:
-                models.add(chat.card.model)
-            session_ids = set(chat.session_ids)
-            for model in models:
-                if model:
-                    session_ids.add(self._scoped_session_id(key, model))
-            if card is not None:
-                session_ids.add(self._scoped_session_id(key, card.model, card.id))
-            # Migration from the pre-scope bridge: the unscoped session.
-            session_ids.add(session_id_for(
-                self.cfg.account.jid, key, self.cfg.policy.session_id_version))
+            try:
+                existing = await asyncio.to_thread(self._existing_sessions, key, chat, tier)
+                session_ids = {entry["id"] for entry in existing}
+            except cli.CLIError:
+                session_ids = self._session_candidates(key, chat, tier)
+            session_ids.update(chat.session_ids)
+            session_ids.add(self._session_id(key, chat, tier))
+            if chat.session_pin:
+                session_ids.add(chat.session_pin)
 
             deleted = 0
             failures: list[str] = []
@@ -1207,6 +1308,7 @@ class Bridge(slixmpp.ClientXMPP):
                     + failures[0])
             else:
                 chat.session_ids.clear()
+                chat.session_pin = ""
                 log.info("cleared context for %s (%d session(s))", key, deleted)
                 await self._reply(
                     key, item,
@@ -1291,23 +1393,118 @@ class Bridge(slixmpp.ClientXMPP):
         merged["encrypted"] = any(i.get("encrypted") for i in items)
         return merged
 
-    def _scoped_session_id(self, key: str, model: str, card_id: str = "") -> str:
+    def _scoped_session_id(self, key: str, model: str, card_id: str = "",
+                           version: str | None = None) -> str:
+        """A legacy session id scoped by model/card (used only for discovery)."""
         scope = f"model:{model}" if model else ""
         if card_id:
             scope = f"{scope}|card:{card_id}" if scope else f"card:{card_id}"
         return session_id_for(self.cfg.account.jid, key,
-                              self.cfg.policy.session_id_version, scope)
+                              version or self.cfg.policy.session_id_version, scope)
 
     def _session_id(self, key: str, chat: _Chat, tier: str) -> str:
-        """One session per contact and selected model/card.
+        """One conversation per contact: the pinned session or the derived one.
 
-        OpenCode stores a session's selected model. Reusing the default session
-        after a switch makes the CLI report "model is not available"; a scope
-        keeps each model's transcript separate and starts cleanly.
+        Model and card switches no longer get their own session; opencode 2.2
+        accepts a new model on an existing session, so a person keeps one
+        transcript and a restart cannot strand them in a second one.
         """
-        card = self._active_card(chat, tier)
-        model = self._active_model(chat, tier)
-        return self._scoped_session_id(key, model, card.id if card else "")
+        if chat.session_pin:
+            return chat.session_pin
+        return session_id_for(self.cfg.account.jid, key,
+                              self.cfg.policy.session_id_version)
+
+    def _session_versions(self) -> list[str]:
+        """The current id version plus older numeric ones, for discovery."""
+        version = self.cfg.policy.session_id_version
+        try:
+            latest = int(version)
+        except ValueError:
+            return [version]
+        if latest < 1:
+            return [version]
+        return [str(number) for number in range(1, latest + 1)]
+
+    def _all_cards(self) -> list[cards.Card]:
+        try:
+            return cards.cards_for_role("admin")
+        except OSError:
+            return []
+
+    def _session_candidates(self, key: str, chat: _Chat, tier: str) -> set[str]:
+        """Every id this contact could own, including the old model/card scopes."""
+        ids: set[str] = set(chat.session_ids)
+        if chat.session_pin:
+            ids.add(chat.session_pin)
+        card_list = self._all_cards()
+        models = {model for model in (self.cfg.admin.model, self.cfg.guest.model) if model}
+        settings = _settings_for(self.cfg, self.cfg.admin if tier == OWNER else self.cfg.guest)
+        try:
+            models.update(cli.list_models(settings))
+        except cli.CLIError:
+            pass
+        models.update(card.model for card in card_list)
+        for version in self._session_versions():
+            ids.add(session_id_for(self.cfg.account.jid, key, version))
+            for model in models:
+                ids.add(self._scoped_session_id(key, model, version=version))
+                for card in card_list:
+                    ids.add(self._scoped_session_id(key, model, card.id, version))
+            for card in card_list:
+                ids.add(self._scoped_session_id(key, "", card.id, version))
+        return ids
+
+    def _existing_sessions(self, key: str, chat: _Chat, tier: str) -> list[dict]:
+        """Sessions this contact owns, newest first. Raises CLIError."""
+        settings = _settings_for(self.cfg, self.cfg.admin if tier == OWNER else self.cfg.guest)
+        listed = cli.list_sessions(settings)
+        candidates = self._session_candidates(key, chat, tier)
+        found = [item for item in listed if item.get("id") in candidates]
+        found.sort(key=lambda item: item.get("updated") or 0, reverse=True)
+        return found
+
+    @staticmethod
+    def _resolve_session(found: list[dict], argument: str) -> dict | None:
+        if argument.isdigit():
+            index = int(argument)
+            return found[index - 1] if 1 <= index <= len(found) else None
+        for item in found:
+            if item.get("id") == argument:
+                return item
+        return None
+
+    @staticmethod
+    def _describe_session(item: dict, active: bool) -> str:
+        when = item.get("updated")
+        stamp = (time.strftime("%Y-%m-%d %H:%M", time.localtime(when / 1000))
+                 if isinstance(when, (int, float)) and when > 0 else "-")
+        title = " ".join(str(item.get("title") or "").split()) or "(untitled)"
+        return (f"{item['id']}  \"{title}\"  {stamp}"
+                + ("  [active]" if active else ""))
+
+    async def _adopt_legacy_session(self, key: str, chat: _Chat, tier: str) -> None:
+        """On the first turn, continue the most recent old scoped session.
+
+        Older builds gave every model/card its own session. If this contact has
+        such sessions and the new unscoped one does not exist yet, adopt the
+        newest so the upgrade does not silently start an empty transcript.
+        """
+        if chat.session_checked or chat.session_pin:
+            chat.session_checked = True
+            return
+        chat.session_checked = True
+        try:
+            found = await asyncio.to_thread(self._existing_sessions, key, chat, tier)
+        except cli.CLIError:
+            return
+        derived = session_id_for(self.cfg.account.jid, key,
+                                 self.cfg.policy.session_id_version)
+        if any(entry.get("id") == derived for entry in found):
+            return
+        if found:
+            chat.session_pin = found[0]["id"]
+            chat.session_ids.add(chat.session_pin)
+            log.info("%s adopted the most recent legacy session %s", key, chat.session_pin)
 
     async def _handle_turn(self, key: str, chat: _Chat, item: dict) -> None:
         room = item.get("room")
@@ -1318,6 +1515,7 @@ class Bridge(slixmpp.ClientXMPP):
             sender = key
             tier = tier_for(sender, self.cfg.policy.owners)
 
+        await self._adopt_legacy_session(key, chat, tier)
         settings = _settings_for(self.cfg, self.cfg.admin if tier == OWNER else self.cfg.guest)
         model = self._active_model(chat, tier)
         if model:

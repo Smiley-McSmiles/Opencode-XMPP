@@ -126,8 +126,10 @@ rather than post plaintext, unless you explicitly set `plaintext_fallback = true
 ## Sessions and privacy between people
 
 - One OpenCode session per (bot, bare JID), derived, not stored by the bridge.
-- One extra session per model or card a person selects, so switching models does not
-  replay an incompatible context.
+  Switching models or cards keeps that session; it does not create another.
+- Older builds created extra model/card-scoped sessions. `sessions` finds them,
+  `session <n|id>` continues one and `close <n|id>` deletes one. The first message
+  after upgrading adopts the most recent old session automatically.
 - Your phone and your laptop share one transcript; another person has a different one.
 - `clear` deletes only the sender's sessions.
 - Bumping `[policy] session_id_version` (then restarting the bridge) gives **everyone**
