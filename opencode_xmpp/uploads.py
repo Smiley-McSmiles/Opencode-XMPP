@@ -226,8 +226,9 @@ async def upload_encrypted(plugin, path: Path, max_mb: int) -> str:
     """Upload AES-256-GCM ciphertext and return an XEP-0454 ``aesgcm://`` URL.
 
     The server never sees the file in the clear.  The fragment carries
-    iv(12) + key(32), base64url encoded; the tag is appended to the uploaded
-    ciphertext, which is what XEP-0454 clients expect.
+    iv(12) + key(32) as hex, which is what XEP-0454 specifies and what Gajim
+    and Conversations parse; base64url fragments are shown as plain links by
+    Gajim.  The tag is appended to the uploaded ciphertext.
     """
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -241,7 +242,7 @@ async def upload_encrypted(plugin, path: Path, max_mb: int) -> str:
         filename=path.name, size=len(ciphertext),
         content_type="application/octet-stream",
         input_file=io.BytesIO(ciphertext))
-    fragment = base64.urlsafe_b64encode(iv + key).decode("ascii").rstrip("=")
+    fragment = (iv + key).hex()
     parsed = urllib.parse.urlparse(str(url))
     if parsed.scheme not in ("https", "aesgcm") or not parsed.netloc:
         raise ValueError(f"upload service returned an unusable URL: {url}")
