@@ -428,6 +428,27 @@ class Bridge(slixmpp.ClientXMPP):
 
     # -- inbound: 1:1 -------------------------------------------------------
 
+    def _is_contact(self, jid: str) -> bool:
+        """True when this bare JID is in the roster with a subscription."""
+        sender = bare_jid(jid)
+        for known in list(self.client_roster.keys()):
+            try:
+                if bare_jid(str(known)) != sender:
+                    continue
+                item = self.client_roster[known]
+                return str(item["subscription"]) in ("both", "from", "to")
+            except (KeyError, ValueError):
+                continue
+        return False
+
+    def _should_quiet(self, jid: str) -> bool:
+        """``quiet_unknown_senders``: silent unless owner or roster contact."""
+        if not self.cfg.policy.quiet_unknown_senders:
+            return False
+        if tier_for(jid, self.cfg.policy.owners) == OWNER:
+            return False
+        return not self._is_contact(jid)
+
     def _on_message(self, msg) -> None:
         # An invitation has no body: catch it here, before the body checks below,
         # so the bridge never depends on a plugin event being wired correctly.
@@ -459,7 +480,8 @@ class Bridge(slixmpp.ClientXMPP):
         if is_ignored(sender, self.cfg.policy.ignore_jids):
             log.debug("ignoring message from %s (do-not-answer list)", sender)
             return
-        if self.cfg.policy.quiet_unknown_senders and tier_for(sender, self.cfg.policy.owners) == GUEST:
+        if self._should_quiet(sender):
+            log.info("ignoring message from %s (not an owner or roster contact)", sender)
             return
         if not self.limiter.allow(sender):
             log.warning("rate limited %s", sender)

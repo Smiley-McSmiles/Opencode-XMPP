@@ -64,6 +64,8 @@ ignore_jids = []
 
 max_chunk_chars = 3800
 rate_limit_per_minute = 8
+# true: answer owners and anyone in the roster (an approved contact/invite),
+#       and stay silent for everyone else. false: answer every guest.
 quiet_unknown_senders = false
 # "interrupt" stops the turn in flight and answers the new message next;
 # "queue" lets the turn finish first. Attachments are never interrupted.

@@ -23,7 +23,7 @@ JIDs are compared in bare, case-folded form, so `local@example.org/phone` and
 | May run commands | yes | no |
 | May use subagents | no (by agent rule) | no (by agent rule) |
 | Default timeout | 600 s | 180 s |
-| Bridge commands | all | `stop`, `help`, `model`, `clear` |
+| Bridge commands | all | `stop`, `help`, `model`, `sessions`, `session`, `close`, `compact`, `clear` |
 
 The tier is not a prompt. It selects a different agent, and the agent's permission
 rules are enforced by opencode. A guest cannot talk its way into a shell command.
@@ -145,3 +145,11 @@ rather than post plaintext, unless you explicitly set `plaintext_fallback = true
 
 Sessions themselves live in opencode's storage (`~/.local/share/opencode`), not in
 `~/.opencode-xmpp`; the bridge only derives their IDs.
+
+
+## Strangers versus contacts
+
+`[policy] quiet_unknown_senders = true` answers owners and anyone **in the bot's
+roster** — a contact after `invite`/`approve` has completed — and stays silent for
+everyone else. This is the setting to use for a bot that should be reachable by
+friends but not by strangers. `false` answers every guest, contact or not.

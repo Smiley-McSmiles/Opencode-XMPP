@@ -30,6 +30,18 @@ Look for `starting as <jid>`, `OMEMO ready` and `discovered upload service`.
 If the service never starts: `systemctl --user status` shows the unit's exit reason.
 A common one is a path in the config that the service user cannot read.
 
+## A new contact gets no reply
+
+Check `[policy] quiet_unknown_senders`:
+
+- `true` answers owners and **roster contacts**; a sender who has not completed
+  `invite`/`approve` is ignored silently.
+- `false` answers every guest.
+
+The approval must actually have completed: the bot should have sent `subscribed` and a
+roster entry should show a subscription of `from`, `to` or `both`. If the contact was
+approved while the bot was offline, restarting it reloads the roster.
+
 ## It answers guests but ignores me
 
 `help` is owner-only. If the bot ignores `help`:
