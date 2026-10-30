@@ -147,6 +147,9 @@ def test_upload_encrypted_puts_ciphertext_on_the_server(tmp_path):
     parsed = urlparse(url)
     assert parsed.scheme == "aesgcm"
     assert parsed.netloc == "upload.example.org"
+    # XEP-0454 wants hex here; Gajim treats a base64url fragment as a plain link.
+    assert len(parsed.fragment) == 88
+    assert all(c in "0123456789abcdef" for c in parsed.fragment)
     material = uploads.aesgcm_key(parsed)
     assert len(material) == 44
     assert AESGCM(material[12:]).decrypt(material[:12], plugin.data, None) == plain
