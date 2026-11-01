@@ -354,11 +354,10 @@ Check that it is a `.json` file directly in `~/.opencode-xmpp/models/`, that it 
 `base_model_id` and `id`/`name`, and that the base model is visible in
 `opencode models`. A card whose base is not an allowed provider is hidden.
 
-**`model <id>` says "No card matches".**
-Selection is card-only; a raw model name (`ollama/gemma4:latest`) is not accepted.
+**`model <id>` says "No card or allowed model matches".**
 Use the exact card ID from `help`, which prints `id — name`. Guests only see the
-`guest/` shelf, so an admin card is "no match" for them. To run a model that has no
-card, add one with that `base_model_id` in the right folder.
+`guest/` shelf, so an admin card is "no match" for them. Owners may also type a full
+`provider/model` (`openrouter/...`) to switch without a card; guests cannot.
 
 **"I couldn't apply the card settings".**
 The config file is not valid JSON, or is not writable by the bridge user. The reply

@@ -77,8 +77,11 @@ def _fake_bridge(tmp_path, cards_dir, config, card=None):
         _default_cards={"admin": card, "guest": card},
         _applied_cards=set(),
         cfg=SimpleNamespace(
-            admin=SimpleNamespace(model="ollama/gemma4:latest"),
-            guest=SimpleNamespace(model=""),
+            opencode=SimpleNamespace(binary="opencode", workspace="~", env=()),
+            admin=SimpleNamespace(model="ollama/gemma4:latest", agent="xmpp-admin",
+                                  auto_approve=True, timeout_s=600),
+            guest=SimpleNamespace(model="", agent="xmpp-guest",
+                                  auto_approve=True, timeout_s=180),
             policy=SimpleNamespace(owners=("local@example.org",)),
         ),
         _reply=fake_reply,
@@ -136,9 +139,10 @@ def test_model_accepts_a_card_and_rejects_a_bare_model(tmp_path, monkeypatch):
     assert data["providers"]["ollama"]["models"]["gemma4:latest"]["body"]["options"]["num_ctx"] == 32768
 
     replies.clear()
+    monkeypatch.setattr(botmod.cli, "list_models", lambda settings: [])
     asyncio.run(botmod.Bridge._handle_model(
         fake, "local@example.org", {}, "ollama/gemma4:latest"))
-    assert "No card matches" in replies[-1]
+    assert "No card or allowed model matches" in replies[-1]
     assert '"base_model_id"' in replies[-1]
 
 
@@ -292,7 +296,7 @@ def test_guest_can_only_select_guest_cards(tmp_path, monkeypatch):
 
     fake, replies = _fake_bridge(tmp_path, tmp_path, tmp_path / "missing.jsonc")
     asyncio.run(botmod.Bridge._handle_model(fake, "remote@example.org", {}, "admin-card"))
-    assert "No card matches" in replies[-1]
+    assert "No card or allowed model matches" in replies[-1]
     assert fake._chats["remote@example.org"].card is None
 
     asyncio.run(botmod.Bridge._handle_model(fake, "remote@example.org", {}, "helper"))
@@ -309,3 +313,37 @@ def test_ensure_dirs_creates_the_role_shelves(tmp_path):
     assert (root / "guest").stat().st_mode & 0o777 == 0o700
     # A second call changes nothing and creates nothing.
     assert cards.ensure_dirs(root) == []
+
+
+def test_owner_can_select_a_provider_model_without_a_card(tmp_path, monkeypatch):
+    fake, replies = _fake_bridge(tmp_path, tmp_path, tmp_path / "missing.jsonc")
+    fake._allowed_provider = lambda: "openrouter"
+    fake._model_allowed = lambda model: model.startswith("openrouter/")
+    fake.cfg.admin = SimpleNamespace(
+        model="openrouter/deepseek/x", agent="xmpp-admin",
+        auto_approve=True, timeout_s=600)
+    monkeypatch.setattr(botmod.cli, "list_models", lambda settings: [
+        "openrouter/minimax/minimax-m3",
+        "openrouter/minimax/minimax-m3.1-flash",
+    ])
+
+    asyncio.run(botmod.Bridge._handle_model(
+        fake, "local@example.org", {}, "openrouter/minimax/minimax-m3.1-flash"))
+    chat = fake._chats["local@example.org"]
+    assert chat.card is None
+    assert chat.model_override == "openrouter/minimax/minimax-m3.1-flash"
+    assert "Model switched to openrouter/minimax/minimax-m3.1-flash" in replies[-1]
+
+
+def test_guest_cannot_select_a_provider_model(tmp_path, monkeypatch):
+    fake, replies = _fake_bridge(tmp_path, tmp_path, tmp_path / "missing.jsonc")
+    fake._allowed_provider = lambda: "openrouter"
+    fake._model_allowed = lambda model: model.startswith("openrouter/")
+    monkeypatch.setattr(botmod.cli, "list_models", lambda settings: [
+        "openrouter/minimax/minimax-m3.1-flash",
+    ])
+
+    asyncio.run(botmod.Bridge._handle_model(
+        fake, "remote@example.org", {}, "openrouter/minimax/minimax-m3.1-flash"))
+    assert "No card or allowed model matches" in replies[-1]
+    assert fake._chats["remote@example.org"].model_override == ""

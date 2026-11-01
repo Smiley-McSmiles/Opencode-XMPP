@@ -148,10 +148,12 @@ audio-capable model. See [OLLAMA.md](OLLAMA.md).
 A request that started with a small context and later needed more can also hit a model
 reload; keeping `OLLAMA_NUM_PARALLEL=1` and a long `OLLAMA_KEEP_ALIVE` avoids it.
 
-## "No card matches" or "restricted to ollama models"
+## "No card or allowed model matches" or "restricted to … models"
 
-`model` only accepts **card IDs**; a raw model name is not a selection any more. Add a
-card whose `base_model_id` is that model, then select the card.
+Guests can only select cards. Owners may also use a full `provider/model`, provided it
+is in the bridge's provider (for example `openrouter/minimax/minimax-m3.1-flash`); if
+it is not listed by `opencode models`, the id is wrong. Add a card instead if you want
+its persona or Ollama options.
 
 A guest sees only `models/guest/`, so a card in the root or `models/admin/` is
 invisible and unselectable for them. Move it into `models/guest/` if a guest should

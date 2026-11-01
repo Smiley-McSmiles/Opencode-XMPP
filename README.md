@@ -102,7 +102,8 @@ advertising `audio`; see [docs/OLLAMA.md](docs/OLLAMA.md).
 **Cards are the model menu.** Drop an Open WebUI export (`*.json`) in
 `~/.opencode-xmpp/models/` and switch with `model my-card`. `help` lists **only your
 cards** — an id and a name, never every model Ollama happens to have and never a base
-model path. The card's persona applies to your chat, and its `num_ctx`, `temperature`,
+model path. Owners can still switch to a full `provider/model` (for example an
+OpenRouter model) when they do not want a card. The card's persona applies to your chat, and its `num_ctx`, `temperature`,
 `top_p`, `top_k`, `repeat_penalty`, `seed` and friends are written into the Ollama
 model's request options — so the card, not the base model's Modelfile, decides the
 context window. `default.json` is the card every chat starts with and what
@@ -273,7 +274,7 @@ cost a turn. Full reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 | --- | --- | --- |
 | `stop` | anyone | Interrupt the answer in progress (`Stopped.`) without a new question |
 | `help` / `?` | anyone, DM | Commands, current card and the cards your tier may use |
-| `model <card-id>` | anyone, DM | Switch this chat to a card (guests: guest cards only) |
+| `model <card-id\|provider/model>` | anyone, DM | Switch to a card; owners may also use a full model id (guests: guest cards only) |
 | `model default` | anyone, DM | Load the role's `default.json` for this chat |
 | `think-off` / `think-on` | owner, DM | Save the reasoning toggle to the active card's JSON |
 | `clear` | anyone, DM | Stop the turn and delete every known OpenCode session for this contact |

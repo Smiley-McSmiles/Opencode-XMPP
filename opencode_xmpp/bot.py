@@ -1095,8 +1095,10 @@ class Bridge(slixmpp.ClientXMPP):
         current = self._active_model(chat, tier) or "(default)"
         if card is not None:
             current += f" (card: {card.name})"
+        model_help = ("  model <card-id|provider/model>" if tier == OWNER
+                      else "  model <card-id>")
         lines = [f"Commands ({role}):", "  stop", "  help",
-                 "  model <card-id>", "  model default",
+                 model_help, "  model default",
                  "  sessions", "  session <number|id>", "  close <number|id>",
                  "  compact"]
         if tier == OWNER:
@@ -1169,6 +1171,41 @@ class Bridge(slixmpp.ClientXMPP):
 
         card = cards.find_card(cards.cards_for_role(role), argument)
         if card is None:
+            # Owners may still switch to a full provider/model id (the OpenRouter
+            # bots rely on this). Cards win; guests are card-only.
+            if (tier == OWNER and "/" in argument
+                    and self._model_allowed(argument)):
+                admin_settings = _settings_for(self.cfg, self.cfg.admin)
+                try:
+                    models = await asyncio.to_thread(cli.list_models, admin_settings)
+                except cli.CLIError as exc:
+                    await self._reply(
+                        key, item, f"I couldn't list the models: {exc.user_message}")
+                    return
+                models = [model for model in models if self._model_allowed(model)]
+                base = argument.split("#", 1)[0]
+                matches = [model for model in models if model == argument]
+                if not matches:
+                    matches = [model for model in models if model == base]
+                if not matches:
+                    matches = [model for model in models if model.endswith("/" + base)]
+                if not matches:
+                    matches = [model for model in models if base in model]
+                if len(matches) > 1:
+                    await self._reply(
+                        key, item,
+                        "That matches more than one model; use the full provider/model:\n"
+                        + "\n".join(f"  {model}" for model in matches[:12]))
+                    return
+                if len(matches) == 1:
+                    chosen = argument if "#" in argument or argument in models else matches[0]
+                    chat.model_override, chat.card = chosen, None
+                    log.info("%s selected model %s", key, chosen)
+                    await self._reply(
+                        key, item,
+                        f"Model switched to {chosen} for this chat. No card is active, "
+                        "so no card persona or options apply; model default resets.")
+                    return
             hint = ""
             if "/" in argument or ":" in argument:
                 base = argument.split("#", 1)[0]
@@ -1176,7 +1213,7 @@ class Bridge(slixmpp.ClientXMPP):
                         f"{(base.split('/', 1)[-1] or base)!r}.")
             await self._reply(
                 key, item,
-                f"No card matches {argument!r}. Models are chosen through cards in "
+                f"No card or allowed model matches {argument!r}. Cards are chosen from "
                 f"{folder}.{hint} Send help to list them.")
             return
         if not self._model_allowed(card.base_model):

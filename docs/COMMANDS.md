@@ -65,13 +65,19 @@ points at that role's folder.
 ## model
 
 ```text
-model <card-id>     # switch this chat to a card you may use
-model default       # load your tier's default card
+model <card-id>              # switch this chat to a card you may use
+model openrouter/<model>     # owner only: switch to a provider model, no card
+model default                # load your tier's default card
 ```
 
-Selection is **card-only**, and restricted to the sender's tier: an owner can pick
+Selection is **card-first**, and restricted to the sender's tier: an owner can pick
 anything in the root, `admin/` or `guest/`; a guest can pick only `models/guest/`.
-Guessing an admin card's id returns "No card matches".
+Guessing an admin card's id returns "No card or allowed model matches".
+
+An **owner** can also type a full `provider/model` (for example
+`openrouter/minimax/minimax-m3.1-flash`). That switches this chat without a card, so no
+card persona or options apply; `model default` resets. This is how the OpenRouter bots
+switch models, since model cards are Ollama-specific. Guests stay card-only.
 
 Matching is exact on `id` or `name`, then a case-insensitive substring, so `model ada`
 finds `Ada (Story)`. A raw model name such as `ollama/gemma4:latest` is rejected with a
