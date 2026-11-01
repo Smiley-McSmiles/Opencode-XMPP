@@ -198,6 +198,11 @@ Kept images are stored per contact under `media/admin/<bare-jid>/` for owners an
 `media/guest/<bare-jid>/` for guests, so an owner's photos are never visible to a guest
 turn — even for the same JID. `clear` deletes them all for that contact.
 
+Every turn also exports `OPENCODE_XMPP_WORK`, a private scratch directory for that
+contact (`work/admin/<bare-jid>/`, `work/guest/<bare-jid>/`), and the turn text says
+`[Scratch directory for this chat: /path]`. Files the agent creates belong there, so a
+`clear` removes them along with the conversation.
+
 Config:
 
 ```toml
@@ -218,12 +223,16 @@ Agents with shell access can also use the standalone helper, which is useful whe
 source image is a local file or URL:
 
 ```sh
-python3 ~/bin/venice_image.py --prompt "..." --out ~/work/img/out.png --no-safe-mode
-python3 ~/bin/venice_image.py --image /absolute/source.png --prompt "..."     --out ~/work/img/out.png --no-safe-mode --aspect-ratio 9:16
+python3 ~/bin/venice_image.py --prompt "..." \
+    --out "$OPENCODE_XMPP_WORK/img/out.png" --no-safe-mode
+python3 ~/bin/venice_image.py --image /absolute/source.png --prompt "..." \
+    --out "$OPENCODE_XMPP_WORK/img/out.png" --no-safe-mode --aspect-ratio 9:16
 ```
 
-Then attach it with `[[attach: /absolute/out.png]]` on its own line. Install the helper
-with `install_venice_image.sh` in the setup directory.
+Then attach it with `[[attach: /absolute/out.png]]` on its own line (the helper prints the
+absolute path). `OPENCODE_XMPP_WORK` is the chat's private scratch directory, which
+`clear` deletes; run the helper by hand and use any writable path instead. Install the
+helper with `install_venice_image.sh` in the setup directory.
 
 ## clear
 
@@ -233,8 +242,8 @@ clear
 
 The "start over" command. It stops any turn in flight, deletes **every** session it can
 find for you (current, pinned, previously used and old scoped ones), deletes the images
-the bridge kept for you (the ones a later turn could otherwise edit), and lets the next
-message start fresh.
+the bridge kept for you and your chat's scratch directory (so files the agent generated
+go too), and lets the next message start fresh.
 
 It only ever touches the sender's own sessions and images. It cannot see or delete
 another contact's context.

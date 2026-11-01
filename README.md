@@ -109,7 +109,9 @@ config; `image openrouter …` / `image venice …` overrides the default for on
 the bridge also keeps the last few owner images and tells the model their paths; the
 agent can then edit one with the Python helper and attach the result. They are stored per
 contact and per tier (`media/admin/<jid>/`, `media/guest/<jid>/`), so owner photos never
-reach a guest turn; `clear` deletes them.
+reach a guest turn. Each turn also gets a private scratch directory in
+`OPENCODE_XMPP_WORK` (and as `[Scratch directory for this chat: …]`) for the files the
+agent creates; `clear` deletes that directory and the kept images.
 
 **Cloud model cards.** A card can target a cloud model by putting the full provider id
 in `base_model_id`, e.g. `openrouter/minimax/minimax-m3.1-flash` or
@@ -297,7 +299,7 @@ cost a turn. Full reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 | `model <card-id\|provider/model>` | anyone, DM | Switch to a card; owners may also use a full model id (guests: guest cards only) |
 | `model default` | anyone, DM | Load the role's `default.json` for this chat |
 | `think-off` / `think-on` | owner, DM | Save the reasoning toggle to the active card's JSON |
-| `clear` | anyone, DM | Stop the turn, delete every known OpenCode session, and drop the kept images for this contact |
+| `clear` | anyone, DM | Stop the turn, delete every known OpenCode session, the kept images and the chat's scratch files |
 | `sessions` | anyone, DM | List this contact's OpenCode sessions, numbered |
 | `session <number\|id>` | anyone, DM | Continue one of those sessions |
 | `close <number\|id>` | anyone, DM | Delete one of those sessions |

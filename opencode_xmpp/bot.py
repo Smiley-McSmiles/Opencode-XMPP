@@ -241,6 +241,8 @@ class Bridge(slixmpp.ClientXMPP):
         self._spool = Path(cfg.features.spool_dir).expanduser()
         # Inbound owner images are kept here (0600) so a later turn can edit them.
         self._media = self._spool.parent / "media"
+        # Per-chat scratch space for files the agent creates (images, exports).
+        self._work = self._spool.parent / "work"
         # Last time we told the owners a room's OMEMO is unreadable (room -> epoch).
         self._room_warned: dict[str, float] = {}
         # Turn counters for the optional manual compaction safety net.
@@ -1565,9 +1567,9 @@ class Bridge(slixmpp.ClientXMPP):
                 self._pins.set(key, "")
                 chat.last_image = None
                 dropped = await asyncio.to_thread(self._forget_images, key)
-                log.info("cleared context for %s (%d session(s), %d image(s))",
+                log.info("cleared context for %s (%d session(s), %d file(s))",
                          key, deleted, dropped)
-                note = f" and {dropped} kept image(s)" if dropped else ""
+                note = f" and {dropped} kept image(s)/file(s)" if dropped else ""
                 await self._reply(
                     key, item,
                     f"Context cleared: deleted {deleted} OpenCode session(s){note} for "
@@ -1778,6 +1780,23 @@ class Bridge(slixmpp.ClientXMPP):
             self._pins.set(key, chat.session_pin)
             log.info("%s adopted the most recent legacy session %s", key, chat.session_pin)
 
+    def _chat_work(self, key: str, tier: str) -> Path:
+        """The scratch directory a chat's agent writes files into."""
+        role = "admin" if tier == OWNER else "guest"
+        return self._work / role / bare_jid(key)
+
+    def _prepare_work(self, key: str, tier: str) -> Path:
+        folder = self._chat_work(key, tier)
+        folder.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            folder.chmod(0o700)
+        return folder
+
+    def _with_work(self, settings: cli.RunSettings, key: str, tier: str) -> cli.RunSettings:
+        """Point the agent at this chat's scratch dir via ``OPENCODE_XMPP_WORK``."""
+        work = self._prepare_work(key, tier)
+        return replace(settings, env=settings.env + (("OPENCODE_XMPP_WORK", str(work)),))
+
     def _media_dir(self, sender: str, tier: str) -> Path:
         """Owner and guest images live in separate trees, never the same folder."""
         role = "admin" if tier == OWNER else "guest"
@@ -1803,10 +1822,11 @@ class Bridge(slixmpp.ClientXMPP):
         return target
 
     def _forget_images(self, sender: str) -> int:
-        """Delete every image kept for this contact, in any tier.
+        """Delete every file the bridge or the agent kept for this contact.
 
-        ``clear`` is "start over", so it drops the admin tree, the guest tree and
-        anything left in the old unsplit layout; returns how many files went.
+        ``clear`` is "start over", so it drops the admin tree, the guest tree,
+        the old unsplit layout and the chat's scratch directory; returns how
+        many files went.
         """
         jid = bare_jid(sender)
         folders = [self._media / role / jid for role in ("admin", "guest")]
@@ -1827,6 +1847,15 @@ class Bridge(slixmpp.ClientXMPP):
                 removed += 1
             with contextlib.suppress(OSError):
                 folder.rmdir()
+        for role in ("admin", "guest"):
+            folder = self._work / role / jid
+            if not folder.is_dir():
+                continue
+            try:
+                removed += sum(1 for item in folder.rglob("*") if item.is_file())
+            except OSError:
+                pass
+            shutil.rmtree(folder, ignore_errors=True)
         return removed
 
     def _latest_image(self, sender: str, tier: str = OWNER) -> Path | None:
@@ -1854,9 +1883,11 @@ class Bridge(slixmpp.ClientXMPP):
         model = self._active_model(chat, tier)
         if model:
             settings = replace(settings, model=model)
+        settings = await asyncio.to_thread(self._with_work, settings, key, tier)
+        work = self._chat_work(key, tier)
         who = f"{item.get('nick')} in the group chat {room}" if room else sender
         preamble = _turn_preamble(self.cfg, who, room)
-        body = preamble
+        body = preamble + f"[Scratch directory for this chat: {work}]\n"
         if tier == OWNER:
             if chat.last_image is None:
                 chat.last_image = self._latest_image(sender, tier)

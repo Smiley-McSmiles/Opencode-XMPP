@@ -138,8 +138,9 @@ rather than post plaintext, unless you explicitly set `plaintext_fallback = true
   remembered across restarts, and the first message after upgrading adopts the most
   recent old session automatically.
 - Your phone and your laptop share one transcript; another person has a different one.
-- `clear` deletes only the sender's sessions, and the images the bridge kept for them
-  (`media/admin/<jid>/`, `media/guest/<jid>/`) — never another contact's.
+- `clear` deletes only the sender's sessions, the images the bridge kept for them
+  (`media/admin/<jid>/`, `media/guest/<jid>/`) and their scratch directory
+  (`work/admin/<jid>/`, `work/guest/<jid>/`) — never another contact's.
 - Bumping `[policy] session_id_version` (then restarting the bridge) gives **everyone**
   a fresh conversation without deleting anything:
 

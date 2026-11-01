@@ -203,7 +203,7 @@ def test_image_edit_uses_the_attached_source(monkeypatch, tmp_path):
 def test_keep_image_keeps_only_the_latest_five(tmp_path):
     from opencode_xmpp import bot as botmod
 
-    fake = SimpleNamespace(_media=tmp_path / "media")
+    fake = SimpleNamespace(_media=tmp_path / "media", _work=tmp_path / "work")
     fake._media_dir = MethodType(botmod.Bridge._media_dir, fake)
     fake._keep_image = MethodType(botmod.Bridge._keep_image, fake)
     fake._latest_image = MethodType(botmod.Bridge._latest_image, fake)
@@ -222,7 +222,7 @@ def test_keep_image_keeps_only_the_latest_five(tmp_path):
 def test_owner_and_guest_images_never_share_a_folder(tmp_path):
     from opencode_xmpp import bot as botmod
 
-    fake = SimpleNamespace(_media=tmp_path / "media")
+    fake = SimpleNamespace(_media=tmp_path / "media", _work=tmp_path / "work")
     fake._media_dir = MethodType(botmod.Bridge._media_dir, fake)
     fake._keep_image = MethodType(botmod.Bridge._keep_image, fake)
     fake._latest_image = MethodType(botmod.Bridge._latest_image, fake)

@@ -6,9 +6,12 @@ credential store (or VENICE_API_KEY), never printed and never put on a
 command line.
 
 Examples:
-  venice_image.py --prompt "a red fox in snow" --out ~/work/img/fox.png
-  venice_image.py --image ~/work/img/src.png --prompt "make it 3D" \
-      --out ~/work/img/edit.png --no-safe-mode
+  venice_image.py --prompt "a red fox in snow" --out "$OPENCODE_XMPP_WORK/img/fox.png"
+  venice_image.py --image "$OPENCODE_XMPP_WORK/img/src.png" --prompt "make it 3D" \
+      --out "$OPENCODE_XMPP_WORK/img/edit.png" --no-safe-mode
+
+The XMPP bridge sets ``OPENCODE_XMPP_WORK`` to the chat's private scratch
+directory, which `clear` deletes. Run by hand, substitute any writable path.
 """
 
 from __future__ import annotations

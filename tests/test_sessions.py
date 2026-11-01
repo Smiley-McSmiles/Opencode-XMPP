@@ -254,9 +254,16 @@ def test_clear_also_deletes_the_kept_images(monkeypatch, tmp_path):
     chat.last_image = tmp_path / "stale.png"
     fake, replies = _fake_bridge(chat)
     fake._media = tmp_path / "media"
+    fake._work = tmp_path / "work"
     fake._forget_images = MethodType(botmod.Bridge._forget_images, fake)
     fake._session_candidates = lambda key, chat, tier: set(chat.session_ids)
     fake._interrupt = lambda chat: None
+
+    scratch = fake._work / "admin" / chat_key / "img"
+    scratch.mkdir(parents=True)
+    (scratch / "out.png").write_bytes(b"generated")
+    (fake._work / "admin" / "other@example.org" / "img").mkdir(parents=True)
+    (fake._work / "admin" / "other@example.org" / "img" / "keep.png").write_bytes(b"keep")
 
     mine = fake._media / "admin" / chat_key
     mine.mkdir(parents=True)
@@ -278,15 +285,18 @@ def test_clear_also_deletes_the_kept_images(monkeypatch, tmp_path):
     assert not mine.exists()
     assert not guest.exists()
     assert not legacy.exists()
+    assert not (fake._work / "admin" / chat_key).exists()
     assert (theirs / "b.png").is_file()
+    assert (fake._work / "admin" / "other@example.org" / "img" / "keep.png").is_file()
     assert chat.last_image is None
-    assert "3 kept image" in replies[-1]
+    assert "4 kept image" in replies[-1]
 
 
 def test_clear_without_images_says_so_plainly(monkeypatch, tmp_path):
     chat = botmod._Chat()
     fake, replies = _fake_bridge(chat)
     fake._media = tmp_path / "media"
+    fake._work = tmp_path / "work"
     fake._forget_images = MethodType(botmod.Bridge._forget_images, fake)
     fake._session_candidates = lambda key, chat, tier: set()
     fake._interrupt = lambda chat: None
@@ -296,3 +306,26 @@ def test_clear_without_images_says_so_plainly(monkeypatch, tmp_path):
     asyncio.run(botmod.Bridge._handle_clear(fake, chat_key, {}))
     assert "Context cleared" in replies[-1]
     assert "kept image" not in replies[-1]
+
+
+def test_turn_settings_point_the_agent_at_its_own_scratch_dir(tmp_path):
+    fake = SimpleNamespace(_work=tmp_path / "work")
+    fake._chat_work = MethodType(botmod.Bridge._chat_work, fake)
+    fake._prepare_work = MethodType(botmod.Bridge._prepare_work, fake)
+    fake._with_work = MethodType(botmod.Bridge._with_work, fake)
+
+    from opencode_xmpp import opencode_cli as cli
+
+    base = cli.RunSettings(env=(("EXISTING", "1"),))
+    owner = fake._with_work(base, chat_key, botmod.OWNER)
+    guest = fake._with_work(base, chat_key, botmod.GUEST)
+
+    owner_env = dict(owner.env)
+    assert owner_env["EXISTING"] == "1"
+    assert owner_env["OPENCODE_XMPP_WORK"] == str(
+        tmp_path / "work" / "admin" / chat_key)
+    assert dict(guest.env)["OPENCODE_XMPP_WORK"] == str(
+        tmp_path / "work" / "guest" / chat_key)
+    folder = tmp_path / "work" / "admin" / chat_key
+    assert folder.is_dir() and folder.stat().st_mode & 0o777 == 0o700
+    assert base.env == (("EXISTING", "1"),)
