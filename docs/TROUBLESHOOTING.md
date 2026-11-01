@@ -34,13 +34,15 @@ A common one is a path in the config that the service user cannot read.
 
 Check `[policy] quiet_unknown_senders`:
 
-- `true` answers owners and **roster contacts**; a sender who has not completed
-  `invite`/`approve` is ignored silently.
+- `true` answers owners and **everyone in the bot's roster**, even before the mutual
+  subscription completes (`subscription = none`); only senders who are not in the roster
+  at all are ignored silently.
 - `false` answers every guest.
 
-The approval must actually have completed: the bot should have sent `subscribed` and a
-roster entry should show a subscription of `from`, `to` or `both`. If the contact was
-approved while the bot was offline, restarting it reloads the roster.
+Check the bot's roster (`contacts` in most clients): the contact has to be there. If it
+is missing, run `invite user@example.org` as the owner, or `approve` the pending request.
+If the roster could not be fetched at login, the filter fails open and the bot retries
+the fetch every few minutes.
 
 ## It answers guests but ignores me
 

@@ -158,6 +158,12 @@ Sessions themselves live in opencode's storage (`~/.local/share/opencode`), not 
 ## Strangers versus contacts
 
 `[policy] quiet_unknown_senders = true` answers owners and anyone **in the bot's
-roster** — a contact after `invite`/`approve` has completed — and stays silent for
-everyone else. This is the setting to use for a bot that should be reachable by
-friends but not by strangers. `false` answers every guest, contact or not.
+roster**, whatever the subscription state: `both`, `from`, `to`, and `none` (a contact
+that was invited or approved but has not finished the mutual subscription) all count.
+Only senders who are not in the roster at all are ignored silently. This is the setting
+to use for a bot that should be reachable by friends but not by strangers. `false`
+answers every guest, contact or not.
+
+If the roster fetch fails at login, the filter fails open — the bot answers rather than
+go silent for contacts it could not load — and the presence loop retries the fetch every
+few minutes.

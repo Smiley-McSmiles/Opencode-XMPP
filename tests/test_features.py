@@ -408,3 +408,22 @@ def test_contact_requests_wait_for_owner_approval(tmp_path):
     assert len(PendingStore(tmp_path / "pending.json")) == 0
 
 
+
+
+def test_accepting_a_contact_adds_them_to_the_roster():
+    from types import SimpleNamespace
+    from opencode_xmpp import bot as botmod
+
+    roster, subscribed, presence = [], [], []
+
+    fake_self = SimpleNamespace(
+        update_roster=lambda jid, **kw: roster.append((jid, kw)),
+        send_presence_subscription=lambda **kw: subscribed.append(kw),
+        send_presence=lambda **kw: presence.append(kw),
+    )
+    botmod.Bridge._accept_subscription(fake_self, "friend@example.org")
+
+    assert roster == [("friend@example.org", {})]
+    assert subscribed == [{"pto": "friend@example.org", "ptype": "subscribed"},
+                          {"pto": "friend@example.org", "ptype": "subscribe"}]
+    assert presence == [{"pto": "friend@example.org"}]

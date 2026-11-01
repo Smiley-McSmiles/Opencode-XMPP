@@ -214,6 +214,9 @@ class Bridge(slixmpp.ClientXMPP):
         self.bot_bare = bare_jid(cfg.account.jid)
         self.limiter = RateLimiter(cfg.policy.rate_limit_per_minute)
         self._chats: dict[str, _Chat] = {}
+        # True once the roster has been fetched successfully; the quiet filter
+        # only trusts "not in the roster" when this is set.
+        self._roster_loaded = False
         self._stopped = asyncio.Event()
         self._upload_host: str = ""
         # The card shelves must exist even when the deployment skipped them.
@@ -312,19 +315,19 @@ class Bridge(slixmpp.ClientXMPP):
         card = self._default_cards.get("admin")
         if card is not None:
             await self._ensure_card_applied(card)
-        # Advertise presence to every contact that is subscribed to us; without a
-        # direct presence after a fresh approval, clients can keep showing "offline".
+        # Advertise presence to every roster contact, whatever the subscription
+        # state; without a direct presence after a fresh approval or invite,
+        # clients keep showing the bot as "offline".
         try:
             await self.get_roster()
+            self._roster_loaded = True
         except Exception:  # noqa: BLE001
             log.exception("could not fetch roster")
         asyncio.create_task(self._presence_loop())
         asyncio.create_task(self._reaction_outbox_loop())
         for jid in list(self.client_roster.keys()):
             try:
-                item = self.client_roster[jid]
-                if item["subscription"] in ("from", "both"):
-                    self.send_presence(pto=jid)
+                self.send_presence(pto=jid)
             except Exception:  # noqa: BLE001
                 log.debug("presence to %s failed", jid, exc_info=True)
 
@@ -341,17 +344,25 @@ class Bridge(slixmpp.ClientXMPP):
                     log.warning("room %s as %s failed (%s); trying another nick", room, nick, exc)
 
     async def _presence_loop(self) -> None:
-        """Re-advertise presence to subscribed contacts every few minutes.
+        """Re-advertise presence to roster contacts every few minutes.
 
         Some servers do not re-broadcast presence after a subscription is
         approved while the client was offline; contacts then sit at "offline".
         """
         while True:
             await asyncio.sleep(240)
+            if not self._roster_loaded:
+                # The quiet filter fails open until this succeeds, so a broker
+                # that was down at startup cannot silence the bot for good.
+                try:
+                    await self.get_roster()
+                    self._roster_loaded = True
+                    log.info("roster loaded on retry")
+                except Exception:  # noqa: BLE001
+                    log.debug("roster refresh failed", exc_info=True)
             try:
                 for jid in list(self.client_roster.keys()):
-                    if self.client_roster[jid]["subscription"] in ("from", "both"):
-                        self.send_presence(pto=jid)
+                    self.send_presence(pto=jid)
             except Exception:  # noqa: BLE001
                 log.debug("presence refresh failed", exc_info=True)
 
@@ -413,7 +424,13 @@ class Bridge(slixmpp.ClientXMPP):
     # -- subscriptions ------------------------------------------------------
 
     def _accept_subscription(self, jid: str) -> None:
-        """Authorize the contact and request their presence back."""
+        """Authorize the contact, request their presence back, keep them on the roster."""
+        try:
+            # An approved contact is a contact: without a roster entry the quiet
+            # filter would drop their messages until the server sent us one.
+            self.update_roster(jid)
+        except Exception:  # noqa: BLE001 - the subscription itself still counts
+            log.debug("could not add %s to the roster", jid, exc_info=True)
         self.send_presence_subscription(pto=jid, ptype="subscribed")
         self.send_presence_subscription(pto=jid, ptype="subscribe")
         self.send_presence(pto=jid)
@@ -452,15 +469,19 @@ class Bridge(slixmpp.ClientXMPP):
     # -- inbound: 1:1 -------------------------------------------------------
 
     def _is_contact(self, jid: str) -> bool:
-        """True when this bare JID is in the roster with a subscription."""
+        """True when this bare JID is in the bot's roster at all.
+
+        A roster entry is the operator's decision to know that JID, so every
+        subscription state counts: ``both``, ``from``, ``to`` and ``none`` (a
+        contact that was invited or approved but has not finished the mutual
+        subscription yet). A blocked contact is not in the roster.
+        """
         sender = bare_jid(jid)
         for known in list(self.client_roster.keys()):
             try:
-                if bare_jid(str(known)) != sender:
-                    continue
-                item = self.client_roster[known]
-                return str(item["subscription"]) in ("both", "from", "to")
-            except (KeyError, ValueError):
+                if bare_jid(str(known)) == sender:
+                    return True
+            except ValueError:
                 continue
         return False
 
@@ -469,6 +490,11 @@ class Bridge(slixmpp.ClientXMPP):
         if not self.cfg.policy.quiet_unknown_senders:
             return False
         if tier_for(jid, self.cfg.policy.owners) == OWNER:
+            return False
+        if not getattr(self, "_roster_loaded", True):
+            # The roster never arrived, so "not in the roster" proves nothing.
+            # Answer rather than go silent, and let the refresh loop retry.
+            log.warning("roster is not loaded yet; answering %s unfiltered", bare_jid(jid))
             return False
         return not self._is_contact(jid)
 
@@ -501,10 +527,11 @@ class Bridge(slixmpp.ClientXMPP):
         if sender == self.bot_bare:
             return  # never answer ourselves
         if is_ignored(sender, self.cfg.policy.ignore_jids):
-            log.debug("ignoring message from %s (do-not-answer list)", sender)
+            # Visible on purpose: a deliberate drop must not look like silence.
+            log.info("ignoring message from %s (do-not-answer list)", sender)
             return
         if self._should_quiet(sender):
-            log.info("ignoring message from %s (not an owner or roster contact)", sender)
+            log.info("ignoring message from %s (not an owner and not in the roster)", sender)
             return
         if not self.limiter.allow(sender):
             log.warning("rate limited %s", sender)
