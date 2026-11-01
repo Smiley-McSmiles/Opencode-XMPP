@@ -104,6 +104,8 @@ advertising `audio`; see [docs/OLLAMA.md](docs/OLLAMA.md).
 itself, using the bot user's OpenCode credential. The result is uploaded encrypted and
 sent like any other attachment. Set `[images] provider` and the provider's model in the
 config; `image openrouter …` / `image venice …` overrides the default for one request.
+`image edit <prompt>` with a photo attached edits that photo through Venice
+(`venice_edit_model`, `aspect_ratio`).
 
 **Cloud model cards.** A card can target a cloud model by putting the full provider id
 in `base_model_id`, e.g. `openrouter/minimax/minimax-m3.1-flash` or
@@ -326,6 +328,7 @@ opencode_xmpp/diagnostics.py  the model-free `repair` report
 opencode_xmpp/__main__.py     CLI: run | check | init | unit | react | handoff
 agents/                       xmpp-admin, xmpp-chat, xmpp-guest, xmpp-ops
 examples/models/              copyable cards (default + persona)
+tools/venice_image.py         standalone image generate/edit helper for agents
 docs/                         how-to guides
 ```
 

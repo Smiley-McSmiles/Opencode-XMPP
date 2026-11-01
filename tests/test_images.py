@@ -134,3 +134,52 @@ def test_export_credential_reads_the_key_from_the_store(monkeypatch):
     monkeypatch.setattr(cli.subprocess, "run", lambda *args, **kwargs: Result())
     settings = cli.RunSettings(binary="opencode", workspace="~")
     assert cli.export_credential(settings, "venice") == "secret-key"
+
+
+def test_venice_edit_posts_the_source_image(monkeypatch):
+    seen = {}
+
+    def fake_post(url, body, key, timeout):
+        seen.update({"url": url, "body": body})
+        return PNG, "image/png"
+
+    monkeypatch.setattr(images, "_post_raw", fake_post)
+    blob = images.edit("venice", "qwen-edit-uncensored", "make it blue", "key",
+                       b"source", 10, False, "9:16")
+    assert blob == PNG
+    assert seen["body"]["image"] == "c291cmNl"
+    assert seen["body"]["model"] == "qwen-edit-uncensored"
+    assert seen["body"]["aspect_ratio"] == "9:16"
+    assert seen["body"]["safe_mode"] is False
+
+
+def test_image_edit_uses_the_attached_source(monkeypatch, tmp_path):
+    fake, replies, attachments = _fake(tmp_path)
+    fake.cfg.images.venice_edit_model = "qwen-edit-uncensored"
+    fake.cfg.images.aspect_ratio = "9:16"
+    source = tmp_path / "src.png"
+    source.write_bytes(PNG)
+    calls = []
+
+    async def fake_download(url, directory, max_mb):
+        calls.append((url, directory))
+        return source
+
+    async def fake_upload(plugin, path, max_mb):
+        return "aesgcm://upload.example.org/edited.png#00"
+
+    def fake_edit(*args, **kwargs):
+        assert args[0] == "venice"
+        assert args[4] == PNG
+        return PNG
+
+    monkeypatch.setattr(uploads, "download", fake_download)
+    monkeypatch.setattr(uploads, "upload_encrypted", fake_upload)
+    monkeypatch.setattr(cli, "export_credential", lambda settings, provider: "key")
+    monkeypatch.setattr(images, "edit", fake_edit)
+
+    asyncio.run(botmod.Bridge._handle_image(
+        fake, "local@example.org", {"body": "image edit make it blue\nhttps://upload.example.org/src.png"},
+        "edit make it blue\nhttps://upload.example.org/src.png"))
+    assert attachments == ["aesgcm://upload.example.org/edited.png#00"]
+    assert calls and calls[0][0] == "https://upload.example.org/src.png"

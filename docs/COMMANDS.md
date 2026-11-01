@@ -183,11 +183,13 @@ image a red fox in the snow
 draw a red fox in the snow
 image venice a red fox in the snow
 image openrouter a red fox in the snow
+image edit make the jacket blue        # with a photo attached to this message
 ```
 
 Owner-only. The bridge calls the provider's image API itself, using the bot user's
 stored OpenCode credential; the agent never sees the key. The result is encrypted and
-uploaded like any other attachment.
+uploaded like any other attachment. `image edit` uses Venice's image-to-image model on
+the image attached to the same message.
 
 Config:
 
@@ -195,12 +197,25 @@ Config:
 [images]
 provider = "venice"                       # or "openrouter"; empty disables this
 venice_model = "grok-imagine-image"
+venice_edit_model = "qwen-edit-uncensored"
 openrouter_model = "google/gemini-3.1-flash-image"
+aspect_ratio = ""                         # e.g. "9:16"
 safe_mode = true                          # Venice: blur adult output
 ```
 
 `image <provider> <prompt>` overrides the default only for that request. If the
 provider credential is missing, log in as the bot user with `opencode auth login`.
+
+Agents with shell access can also use the standalone helper, which is useful when the
+source image is a local file or URL:
+
+```sh
+python3 ~/bin/venice_image.py --prompt "..." --out ~/work/img/out.png --no-safe-mode
+python3 ~/bin/venice_image.py --image /absolute/source.png --prompt "..."     --out ~/work/img/out.png --no-safe-mode --aspect-ratio 9:16
+```
+
+Then attach it with `[[attach: /absolute/out.png]]` on its own line. Install the helper
+with `install_venice_image.sh` in the setup directory.
 
 ## clear
 

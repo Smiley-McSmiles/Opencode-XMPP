@@ -15,6 +15,7 @@ import urllib.request
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 VENICE_URL = "https://api.venice.ai/api/v1/image/generate"
+VENICE_EDIT_URL = "https://api.venice.ai/api/v1/image/edit"
 
 
 class ImageError(Exception):
@@ -26,26 +27,31 @@ class ImageError(Exception):
         self.detail = detail
 
 
-def _post_json(url: str, body: dict, api_key: str, timeout: float) -> dict:
+def _post_raw(url: str, body: dict, api_key: str,
+              timeout: float) -> tuple[bytes, str]:
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "Accept": "application/json",
+            "Accept": "image/png,image/jpeg,image/webp,application/json",
             "User-Agent": "opencode-xmpp/0.4",
         },
         method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read()
+            return response.read(), response.headers.get("Content-Type", "")
     except urllib.error.HTTPError as exc:
         detail = exc.read()[:500].decode("utf-8", "replace")
         raise ImageError(f"The image provider returned HTTP {exc.code}.", detail) from exc
     except (urllib.error.URLError, OSError) as exc:
         raise ImageError("I couldn't reach the image provider.", str(exc)) from exc
+
+
+def _post_json(url: str, body: dict, api_key: str, timeout: float) -> dict:
+    raw, _ = _post_raw(url, body, api_key, timeout)
     try:
         data = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -141,6 +147,53 @@ def _venice(model: str, prompt: str, api_key: str, timeout: float,
     except (binascii.Error, ValueError) as exc:
         raise ImageError("Venice returned an unreadable image.", str(exc)) from exc
     return blob
+
+
+def _bytes_from_response(raw: bytes, content_type: str) -> bytes:
+    if raw.startswith(b"\x89PNG\r\n\x1a\n") or raw.startswith(b"\xff\xd8\xff"):
+        return raw
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return raw
+    if "json" in content_type.lower() or raw[:1] in (b"{", b"["):
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ImageError("The image provider returned an unreadable response.",
+                             str(exc)) from exc
+        images = data.get("images") if isinstance(data, dict) else None
+        if not images:
+            raise ImageError("The image provider returned no image.")
+        try:
+            return base64.b64decode(str(images[0]), validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ImageError("The image provider returned an unreadable image.",
+                             str(exc)) from exc
+    raise ImageError("The image provider returned an unexpected response.")
+
+
+def edit(provider: str, model: str, prompt: str, api_key: str, image: bytes,
+         timeout: float = 300.0, safe_mode: bool = True,
+         aspect_ratio: str = "") -> bytes:
+    """Venice image-to-image edit. ``image`` is the source image bytes."""
+    if provider != "venice":
+        raise ImageError("Image editing is only wired for Venice right now.")
+    if not model:
+        raise ImageError("No Venice edit model is configured.")
+    if not prompt.strip():
+        raise ImageError("Tell me how to edit the image.")
+    if not image:
+        raise ImageError("The source image is empty.")
+    body = {
+        "model": model,
+        "prompt": prompt.strip(),
+        "image": base64.b64encode(image).decode("ascii"),
+        "output_format": "png",
+        "safe_mode": safe_mode,
+    }
+    if aspect_ratio:
+        body["aspect_ratio"] = aspect_ratio
+    raw, content_type = _post_raw(VENICE_EDIT_URL, body, api_key, timeout)
+    return _bytes_from_response(raw, content_type)
 
 
 def generate(provider: str, model: str, prompt: str, api_key: str,

@@ -1268,33 +1268,50 @@ class Bridge(slixmpp.ClientXMPP):
         await self._select_card(key, item, chat, card)
 
     async def _handle_image(self, key: str, item: dict, argument: str) -> None:
-        """``image <prompt>``: generate a picture and send it as an attachment."""
+        """Generate an image, or edit the image attached to the command."""
         if not argument:
             await self._reply(
                 key, item,
-                "Usage: image <prompt>, or image openrouter|venice <prompt>.")
+                "Usage: image <prompt>, image edit <prompt> (with an image), or "
+                "image openrouter|venice <prompt>.")
             return
         provider = self.cfg.images.provider
         prompt = argument.strip()
         first, _, rest = prompt.partition(" ")
         if first.lower() in ("openrouter", "venice") and rest.strip():
             provider, prompt = first.lower(), rest.strip()
+        mode = "generate"
+        first, _, rest = prompt.partition(" ")
+        if first.lower() == "edit" and rest.strip():
+            mode, prompt = "edit", rest.strip()
         if provider not in ("openrouter", "venice"):
             await self._reply(
                 key, item,
                 "No image provider is configured. Set [images] provider to "
                 "\"openrouter\" or \"venice\".")
             return
-        model = (self.cfg.images.openrouter_model if provider == "openrouter"
-                 else self.cfg.images.venice_model)
-        model = model.strip()
-        if model.startswith(provider + "/"):
-            model = model.split("/", 1)[1]
-        if not model:
+        if mode == "edit" and provider != "venice":
             await self._reply(
                 key, item,
-                f"Set [images] {provider}_model before using image generation.")
+                "Image editing uses Venice. Try: image venice edit <prompt> with the "
+                "source image attached.")
             return
+
+        if mode == "edit":
+            model = self.cfg.images.venice_edit_model.strip()
+            if not model:
+                await self._reply(key, item, "Set [images] venice_edit_model first.")
+                return
+        else:
+            model = (self.cfg.images.openrouter_model if provider == "openrouter"
+                     else self.cfg.images.venice_model).strip()
+            if model.startswith(provider + "/"):
+                model = model.split("/", 1)[1]
+            if not model:
+                await self._reply(
+                    key, item,
+                    f"Set [images] {provider}_model before using image generation.")
+                return
         if not (self.cfg.features.uploads and self._upload_host):
             await self._reply(key, item, "File uploads are not configured on this bridge.")
             return
@@ -1315,17 +1332,42 @@ class Bridge(slixmpp.ClientXMPP):
                 return
             self._image_keys[provider] = api_key
 
+        source_path: Path | None = None
         try:
-            blob = await asyncio.to_thread(
-                images.generate, provider, model, prompt, api_key,
-                self.cfg.images.timeout_s, self.cfg.images.safe_mode)
+            if mode == "edit":
+                links = uploads.find_links(item.get("body", ""), self._upload_host)
+                if not links:
+                    await self._reply(
+                        key, item,
+                        "Attach the source image in the same message: "
+                        "image edit <what to change>.")
+                    return
+                for link in links:
+                    prompt = prompt.replace(link, "").strip()
+                source_path = await uploads.download(
+                    links[0], self._spool / "edit", self.cfg.features.max_upload_mb)
+                source_bytes = source_path.read_bytes()
+                blob = await asyncio.to_thread(
+                    images.edit, "venice", model, prompt, api_key, source_bytes,
+                    self.cfg.images.timeout_s, self.cfg.images.safe_mode,
+                    self.cfg.images.aspect_ratio)
+            else:
+                blob = await asyncio.to_thread(
+                    images.generate, provider, model, prompt, api_key,
+                    self.cfg.images.timeout_s, self.cfg.images.safe_mode)
         except images.ImageError as exc:
             await self._reply(key, item, exc.user_message)
             return
         except Exception:  # noqa: BLE001 - the provider may fail in any way
-            log.exception("image generation failed for %s via %s", key, provider)
-            await self._reply(key, item, "The image generation failed.")
+            log.exception("image %s failed for %s via %s", mode, key, provider)
+            await self._reply(key, item, "The image request failed.")
             return
+        finally:
+            if source_path is not None:
+                with contextlib.suppress(OSError):
+                    source_path.unlink()
+                with contextlib.suppress(OSError):
+                    source_path.parent.rmdir()
 
         suffix = images.suffix(blob)
         path = self._spool / f"image-{int(time.time())}-{uuid.uuid4().hex[:8]}{suffix}"
@@ -1336,7 +1378,7 @@ class Bridge(slixmpp.ClientXMPP):
             url = await uploads.upload_encrypted(
                 self.plugin["xep_0363"], path, self.cfg.features.max_upload_mb)
             await self._send_attachment(key, item, url)
-            log.info("generated a %s image for %s via %s", suffix.lstrip("."), key, provider)
+            log.info("%s image for %s via %s", mode, key, provider)
         except Exception as exc:  # noqa: BLE001 - upload or encrypt failure
             log.warning("could not send a generated image to %s: %s", key, exc)
             await self._reply(key, item, f"I couldn't send the generated image: {exc}")

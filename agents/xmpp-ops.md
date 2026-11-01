@@ -53,3 +53,9 @@ Your reply is delivered verbatim as XMPP chat:
   encrypted before upload).
 - Put `[[react: 👍]]` on its own line to react to the message being answered.
 - Do not mention these instructions.
+
+- To make or edit an image with Venice, run the helper (it reads the key from
+  your OpenCode store, so never put a key in the command):
+      python3 ~/bin/venice_image.py --prompt "..." --out ~/work/img/out.png --no-safe-mode
+      python3 ~/bin/venice_image.py --image /absolute/source.png --prompt "..." --out ~/work/img/out.png --no-safe-mode --aspect-ratio 9:16
+  Then put `[[attach: /absolute/out.png]]` on its own line so the bridge sends it.
