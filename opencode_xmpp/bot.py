@@ -18,13 +18,14 @@ import shlex
 import subprocess
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import slixmpp
 from slixmpp import JID
 
-from . import approvals, cards, diagnostics, omemo, opencode_cli as cli, reactions, storage, uploads
+from . import approvals, cards, diagnostics, images, omemo, opencode_cli as cli, reactions, storage, uploads
 from .chunk import split_message
 from .config import Config, Tier, read_secret
 from .policy import (GUEST, OWNER, RateLimiter, bare_jid, is_ignored,
@@ -178,6 +179,19 @@ def _turn_preamble(cfg: Config, who: str, room: str | None) -> str:
             f"{where} at {stamp}. Reply as a chat message.\n\n")
 
 
+def _configured_providers(cfg: Config) -> tuple[str, ...]:
+    """Provider prefixes used to parse card base_model_id values."""
+    allowed = tuple(provider for provider in cfg.policy.allowed_providers if provider)
+    if allowed:
+        return allowed
+    found: list[str] = []
+    for model in (cfg.admin.model, cfg.guest.model):
+        model = (model or "").strip()
+        if "/" in model:
+            found.append(model.split("/", 1)[0].strip().lower())
+    return tuple(dict.fromkeys(found)) or ("ollama",)
+
+
 def _settings_for(cfg: Config, tier: Tier) -> cli.RunSettings:
     """The CLI invocation for one trust tier."""
     return cli.RunSettings(
@@ -206,14 +220,17 @@ class Bridge(slixmpp.ClientXMPP):
                 log.info("created model card folder %s", folder)
         except Exception:  # noqa: BLE001 - never fail to start over a folder
             log.warning("could not create the model card folders", exc_info=True)
+        self._card_providers = _configured_providers(cfg)
         # Role-specific default cards: models/admin/default.json and
         # models/guest/default.json, each falling back to models/default.json.
         self._default_cards: dict[str, cards.Card | None] = {
-            "admin": cards.load_default_for("admin"),
-            "guest": cards.load_default_for("guest"),
+            "admin": cards.load_default_for("admin", providers=self._card_providers),
+            "guest": cards.load_default_for("guest", providers=self._card_providers),
         }
         # Cards already written into opencode's config this process.
         self._applied_cards: set[tuple[str, str]] = set()
+        # Provider API keys read from this user's opencode store, in memory only.
+        self._image_keys: dict[str, str] = {}
         _instance = bare_jid(cfg.account.jid).split('@', 1)[0]
         self._pins = storage.SessionPins(
             Path(cfg.features.omemo_storage).expanduser().with_name(f"sessions-{_instance}.json"))
@@ -689,6 +706,10 @@ class Bridge(slixmpp.ClientXMPP):
                 chat = self._chats.setdefault(key, _Chat())
                 self._queue_turn(key, chat, item)
                 return
+            image_arg = approvals.image_command(text)
+            if image_arg is not None:
+                asyncio.create_task(self._handle_image(key, item, image_arg))
+                return
             think = approvals.think_command(text)
             if think is not None:
                 asyncio.create_task(self._handle_think(key, item, think))
@@ -948,6 +969,12 @@ class Bridge(slixmpp.ClientXMPP):
                 f"No model card is active. Add {cards.DEFAULT_NAME} to "
                 f"{cards.default_dir()} or select a card with model <card-id>.")
             return
+        if card.provider != "ollama":
+            await self._reply(
+                key, item,
+                f"think-on/think-off applies to Ollama cards; {card.name} uses "
+                f"{card.base_model}.")
+            return
         enabled = state == "on"
         try:
             updated = await asyncio.to_thread(cards.set_param, card, "think", enabled)
@@ -1052,8 +1079,10 @@ class Bridge(slixmpp.ClientXMPP):
 
     def _reload_default_card(self, tier: str) -> cards.Card | None:
         # Reload both roles: they may share the root default card.
-        self._default_cards["admin"] = cards.load_default_for("admin")
-        self._default_cards["guest"] = cards.load_default_for("guest")
+        self._default_cards["admin"] = cards.load_default_for(
+            "admin", providers=self._card_providers)
+        self._default_cards["guest"] = cards.load_default_for(
+            "guest", providers=self._card_providers)
         return self._default_card_for(tier)
 
     async def _ensure_card_applied(self, card: cards.Card) -> None:
@@ -1115,6 +1144,7 @@ class Bridge(slixmpp.ClientXMPP):
         if tier == OWNER:
             lines += [
                 "  think-off / think-on  (saved to the active card)",
+                "  image <prompt>",
                 "  restart",
                 "  repair [focus]",
             ]
@@ -1130,7 +1160,8 @@ class Bridge(slixmpp.ClientXMPP):
         folder = cards.default_dir() if tier == OWNER else cards.default_dir() / "guest"
         lines.extend(["", f"Cards ({folder}):"])
         try:
-            found = [entry for entry in cards.cards_for_role(role)
+            found = [entry for entry in cards.cards_for_role(
+                         role, providers=self._card_providers)
                      if self._model_allowed(entry.base_model)]
         except OSError as exc:
             lines.append(f"  (unreadable: {exc})")
@@ -1180,7 +1211,8 @@ class Bridge(slixmpp.ClientXMPP):
             await self._select_card(key, item, chat, card)
             return
 
-        card = cards.find_card(cards.cards_for_role(role), argument)
+        card = cards.find_card(
+            cards.cards_for_role(role, providers=self._card_providers), argument)
         if card is None:
             # Owners may still switch to a full provider/model id (the OpenRouter
             # bots rely on this). Cards win; guests are card-only.
@@ -1234,6 +1266,83 @@ class Bridge(slixmpp.ClientXMPP):
                 f"to {self._provider_label()} models.")
             return
         await self._select_card(key, item, chat, card)
+
+    async def _handle_image(self, key: str, item: dict, argument: str) -> None:
+        """``image <prompt>``: generate a picture and send it as an attachment."""
+        if not argument:
+            await self._reply(
+                key, item,
+                "Usage: image <prompt>, or image openrouter|venice <prompt>.")
+            return
+        provider = self.cfg.images.provider
+        prompt = argument.strip()
+        first, _, rest = prompt.partition(" ")
+        if first.lower() in ("openrouter", "venice") and rest.strip():
+            provider, prompt = first.lower(), rest.strip()
+        if provider not in ("openrouter", "venice"):
+            await self._reply(
+                key, item,
+                "No image provider is configured. Set [images] provider to "
+                "\"openrouter\" or \"venice\".")
+            return
+        model = (self.cfg.images.openrouter_model if provider == "openrouter"
+                 else self.cfg.images.venice_model)
+        model = model.strip()
+        if model.startswith(provider + "/"):
+            model = model.split("/", 1)[1]
+        if not model:
+            await self._reply(
+                key, item,
+                f"Set [images] {provider}_model before using image generation.")
+            return
+        if not (self.cfg.features.uploads and self._upload_host):
+            await self._reply(key, item, "File uploads are not configured on this bridge.")
+            return
+
+        api_key = self._image_keys.get(provider)
+        if not api_key:
+            settings = _settings_for(self.cfg, self.cfg.admin)
+            try:
+                api_key = await asyncio.to_thread(cli.export_credential, settings, provider)
+            except Exception:  # noqa: BLE001 - never leak key material in an error
+                log.exception("could not read the %s credential", provider)
+                api_key = None
+            if not api_key:
+                await self._reply(
+                    key, item,
+                    f"No {provider} credential is stored for this bot. Run "
+                    f"opencode auth login as the bot user.")
+                return
+            self._image_keys[provider] = api_key
+
+        try:
+            blob = await asyncio.to_thread(
+                images.generate, provider, model, prompt, api_key,
+                self.cfg.images.timeout_s, self.cfg.images.safe_mode)
+        except images.ImageError as exc:
+            await self._reply(key, item, exc.user_message)
+            return
+        except Exception:  # noqa: BLE001 - the provider may fail in any way
+            log.exception("image generation failed for %s via %s", key, provider)
+            await self._reply(key, item, "The image generation failed.")
+            return
+
+        suffix = images.suffix(blob)
+        path = self._spool / f"image-{int(time.time())}-{uuid.uuid4().hex[:8]}{suffix}"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(blob)
+        path.chmod(0o600)
+        try:
+            url = await uploads.upload_encrypted(
+                self.plugin["xep_0363"], path, self.cfg.features.max_upload_mb)
+            await self._send_attachment(key, item, url)
+            log.info("generated a %s image for %s via %s", suffix.lstrip("."), key, provider)
+        except Exception as exc:  # noqa: BLE001 - upload or encrypt failure
+            log.warning("could not send a generated image to %s: %s", key, exc)
+            await self._reply(key, item, f"I couldn't send the generated image: {exc}")
+        finally:
+            with contextlib.suppress(OSError):
+                path.unlink()
 
     async def _handle_compact(self, key: str, item: dict) -> None:
         """``compact``: ask opencode to compact this chat's session now."""
@@ -1461,6 +1570,13 @@ class Bridge(slixmpp.ClientXMPP):
     async def _run_chat(self, key: str, chat: _Chat) -> None:
         """One runner per conversation: never two answers in flight for a user."""
         while chat.pending:
+            delay = self.cfg.policy.message_debounce_ms / 1000.0
+            if delay > 0:
+                # Give a burst of messages a moment to arrive, then fold them
+                # into one turn. A message during this wait only appends.
+                await asyncio.sleep(delay)
+                if not chat.pending:
+                    continue
             items = chat.pending
             chat.pending = []
             item = self._merge_items(items)
@@ -1527,7 +1643,7 @@ class Bridge(slixmpp.ClientXMPP):
 
     def _all_cards(self) -> list[cards.Card]:
         try:
-            return cards.cards_for_role("admin")
+            return cards.cards_for_role("admin", providers=self._card_providers)
         except OSError:
             return []
 

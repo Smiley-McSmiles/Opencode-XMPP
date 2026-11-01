@@ -99,14 +99,27 @@ passed to `opencode run --file`, so a vision model actually sees the photo and a
 audio-capable model hears the voice note. Audio support still depends on the model
 advertising `audio`; see [docs/OLLAMA.md](docs/OLLAMA.md).
 
+**Image generation, without giving the agent a key.** Owners can send
+`image a fox in the snow` (or `draw …`) and the bridge calls OpenRouter or Venice
+itself, using the bot user's OpenCode credential. The result is uploaded encrypted and
+sent like any other attachment. Set `[images] provider` and the provider's model in the
+config; `image openrouter …` / `image venice …` overrides the default for one request.
+
+**Cloud model cards.** A card can target a cloud model by putting the full provider id
+in `base_model_id`, e.g. `openrouter/minimax/minimax-m3.1-flash` or
+`venice/deepseek-v4-1-flash-1017-uncensored`. The persona still applies; Ollama-only
+parameters (`num_ctx`, sampling, `think`) are ignored, because they are not OpenCode
+provider settings for those hosts.
+
 **Cards are the model menu.** Drop an Open WebUI export (`*.json`) in
 `~/.opencode-xmpp/models/` and switch with `model my-card`. `help` lists **only your
 cards** — an id and a name, never every model Ollama happens to have and never a base
 model path. Owners can still switch to a full `provider/model` (for example an
-OpenRouter model) when they do not want a card. The card's persona applies to your chat, and its `num_ctx`, `temperature`,
-`top_p`, `top_k`, `repeat_penalty`, `seed` and friends are written into the Ollama
-model's request options — so the card, not the base model's Modelfile, decides the
-context window. `default.json` is the card every chat starts with and what
+OpenRouter model) when they do not want a card. The card's persona applies to your
+chat. For an **Ollama** card, `num_ctx`, `temperature`, `top_p`, `top_k`,
+`repeat_penalty`, `seed` and friends are written into the model's request options — so
+the card, not the base model's Modelfile, decides the context window. Cloud cards carry
+the persona and model only. `default.json` is the card every chat starts with and what
 `model default` loads. See [docs/MODEL-CARDS.md](docs/MODEL-CARDS.md).
 
 **Separate card shelves for owners and guests.** `models/admin/` and `models/guest/`
@@ -119,8 +132,9 @@ Encrypted rooms use OMEMO 2 over the XEP-0420 stanza-content envelope; the bridg
 builds and parses that envelope itself, reads both versions, and refuses to fall back
 to plaintext.
 
-**Interrupt, stop, continue.** A new message interrupts the answer in flight and is
-answered next in the same session; a bare `stop` stops without asking a new question.
+**Interrupt, stop, continue.** A new message interrupts the answer in flight; messages
+sent back-to-back are merged and answered once after a short debounce. A bare `stop`
+stops without asking a new question.
 Replies longer than `max_chunk_chars` are split on line boundaries with code fences
 closed and re-opened. Typing indicators, delivery receipts and XEP-0444 reactions work.
 
@@ -282,6 +296,7 @@ cost a turn. Full reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 | `session <number\|id>` | anyone, DM | Continue one of those sessions |
 | `close <number\|id>` | anyone, DM | Delete one of those sessions |
 | `compact` | anyone, DM | Ask opencode to compact this chat's session now |
+| `image <prompt>` | owner, DM | Generate an image (OpenRouter/Venice) and send it encrypted |
 | `restart` | owner, DM | Acknowledge, then restart this bridge's systemd unit |
 | `repair [focus]` | owner, DM | Model-free diagnostics, sent as a redacted report |
 | `invite <jid>` | owner, DM | Add a contact and send a presence subscription |
@@ -298,7 +313,8 @@ opencode_xmpp/config.py       TOML + 0600 secret files
 opencode_xmpp/policy.py       JID normalisation, owner/guest tiering, derived session ids
 opencode_xmpp/bot.py          slixmpp client, per-conversation runner, chat commands
 opencode_xmpp/opencode_cli.py one `opencode run` per turn; interrupt, compact, delete
-opencode_xmpp/cards.py        Open WebUI model cards → persona + Ollama options
+opencode_xmpp/cards.py        Open WebUI model cards → persona + provider/model
+opencode_xmpp/images.py       OpenRouter/Venice text-to-image generation
 opencode_xmpp/thinking.py     reasoning overrides applied to opencode.jsonc
 opencode_xmpp/uploads.py      XEP-0363 uploads (AES-GCM), XEP-0454 downloads
 opencode_xmpp/omemo.py        OMEMO device management

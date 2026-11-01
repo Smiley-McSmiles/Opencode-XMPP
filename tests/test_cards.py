@@ -75,6 +75,7 @@ def _fake_bridge(tmp_path, cards_dir, config, card=None):
     fake = SimpleNamespace(
         _chats={},
         _default_cards={"admin": card, "guest": card},
+        _card_providers=("ollama",),
         _applied_cards=set(),
         cfg=SimpleNamespace(
             opencode=SimpleNamespace(binary="opencode", workspace="~", env=()),

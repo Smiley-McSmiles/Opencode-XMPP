@@ -53,6 +53,7 @@ class Card:
     think: bool | None
     num_ctx: int | None
     source: Path
+    provider: str = "ollama"      # ollama, openrouter, venice, ...
     options: dict[str, object] = field(default_factory=dict)
 
     @property
@@ -93,22 +94,31 @@ def _options_from(params: dict) -> dict[str, object]:
     return options
 
 
-def _card(entry: dict, source: Path) -> Card | None:
+def _card(entry: dict, source: Path,
+          providers: tuple[str, ...] = ("ollama",)) -> Card | None:
     if not isinstance(entry, dict):
         return None
     cid = _text(entry.get("id") or entry.get("slug") or entry.get("name"))
     name = _text(entry.get("name") or cid)
     if not cid or not name:
         return None
-    base = _text(entry.get("base_model_id") or entry.get("baseModelId"))
-    if not base:
+    raw_base = _text(entry.get("base_model_id") or entry.get("baseModelId"))
+    if not raw_base:
         # Open WebUI exports a model that *is* a base model with
-        # base_model_id: null, and its id is the Ollama model name
-        # ("gemma4:26b"). Treat that as the base instead of dropping the card.
-        base = cid
-    if base.startswith("ollama/"):
-        base = base.split("/", 1)[1]
-    base = base.strip()
+        # base_model_id: null, and its id is the model name ("gemma4:26b").
+        raw_base = cid
+    raw_base = raw_base.strip()
+    if not raw_base:
+        return None
+    # A full provider/model id is used as-is when its provider is configured.
+    # Bare names remain Ollama ids, including names with a slash such as
+    # "some-org/gemma4:latest" that are not provider prefixes.
+    known = {provider.strip().lower() for provider in providers} | {"ollama"}
+    first = raw_base.split("/", 1)[0].strip().lower() if "/" in raw_base else ""
+    if first in known:
+        provider, base = first, raw_base.split("/", 1)[1].strip()
+    else:
+        provider, base = "ollama", raw_base
     if not base:
         return None
 
@@ -124,9 +134,9 @@ def _card(entry: dict, source: Path) -> Card | None:
     except (TypeError, ValueError):
         num_ctx = None
 
-    return Card(id=cid, name=name, base_model=f"ollama/{base}", base_id=base,
+    return Card(id=cid, name=name, base_model=f"{provider}/{base}", base_id=base,
                 system=system, think=think, num_ctx=num_ctx, source=source,
-                options=_options_from(params))
+                provider=provider, options=_options_from(params))
 
 
 def default_path(directory: Path | None = None) -> Path:
@@ -155,7 +165,7 @@ def ensure_dirs(directory: Path | None = None) -> list[Path]:
     return created
 
 
-def _read_default(path: Path) -> Card | None:
+def _read_default(path: Path, providers: tuple[str, ...] = ("ollama",)) -> Card | None:
     if not path.is_file():
         return None
     try:
@@ -164,7 +174,7 @@ def _read_default(path: Path) -> Card | None:
         return None
     entries = data if isinstance(data, list) else [data]
     for entry in entries:
-        card = _card(entry, path)
+        card = _card(entry, path, providers)
         if card is not None:
             return card
     return None
@@ -175,13 +185,14 @@ def load_default(directory: Path | None = None) -> Card | None:
     return _read_default(default_path(directory))
 
 
-def load_default_for(role: str, directory: Path | None = None) -> Card | None:
+def load_default_for(role: str, directory: Path | None = None,
+                     providers: tuple[str, ...] = ("ollama",)) -> Card | None:
     """The role's default card: ``models/<role>/default.json``, else the root one."""
     root = Path(directory) if directory is not None else default_dir()
-    card = _read_default(root / role / DEFAULT_NAME)
+    card = _read_default(root / role / DEFAULT_NAME, providers)
     if card is not None:
         return card
-    return _read_default(root / DEFAULT_NAME)
+    return _read_default(root / DEFAULT_NAME, providers)
 
 
 def _matching_entry(data: object, card: Card) -> dict | None:
@@ -189,7 +200,7 @@ def _matching_entry(data: object, card: Card) -> dict | None:
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        found = _card(entry, card.source)
+        found = _card(entry, card.source, (card.provider,))
         if found is not None and found.id == card.id and found.base_id == card.base_id:
             return entry
     return None
@@ -224,7 +235,8 @@ def set_param(card: Card, key: str, value: object) -> Card:
     return updated
 
 
-def _read_cards(root: Path) -> list[Card]:
+def _read_cards(root: Path,
+                providers: tuple[str, ...] = ("ollama",)) -> list[Card]:
     if not root.is_dir():
         return []
     cards: list[Card] = []
@@ -235,19 +247,21 @@ def _read_cards(root: Path) -> list[Card]:
             continue
         entries = data if isinstance(data, list) else [data]
         for entry in entries:
-            card = _card(entry, path)
+            card = _card(entry, path, providers)
             if card is not None:
                 cards.append(card)
     return cards
 
 
-def load_cards(directory: Path | None = None) -> list[Card]:
+def load_cards(directory: Path | None = None,
+               providers: tuple[str, ...] = ("ollama",)) -> list[Card]:
     """Read every ``*.json`` card in one directory, skipping non-card files."""
     root = Path(directory) if directory is not None else default_dir()
-    return _read_cards(root)
+    return _read_cards(root, providers)
 
 
-def cards_for_role(role: str, directory: Path | None = None) -> list[Card]:
+def cards_for_role(role: str, directory: Path | None = None,
+                   providers: tuple[str, ...] = ("ollama",)) -> list[Card]:
     """The cards one trust tier may see and select.
 
     Guests get ``models/guest/`` only. Admins get the root (shared/legacy cards),
@@ -261,7 +275,7 @@ def cards_for_role(role: str, directory: Path | None = None) -> list[Card]:
     cards: list[Card] = []
     seen: set[tuple[str, str]] = set()
     for folder in directories:
-        for card in _read_cards(folder):
+        for card in _read_cards(folder, providers):
             key = (card.id.casefold(), card.base_id.casefold())
             if key in seen:
                 continue
@@ -303,11 +317,14 @@ def render_system(card: Card, user: str) -> str:
 def apply_params(config: dict, card: Card) -> list[str]:
     """Apply a card's thinking and Ollama options to its base model.
 
-    Everything lands under ``providers.ollama.models.<base>.body.options``, which
-    OpenCode sends with the request.  That way the card -- not the base model's
-    Modelfile -- decides the context window and the sampling parameters.
+    Ollama cards write ``providers.ollama.models.<base>.*``.  Cloud cards
+    (OpenRouter/Venice) only carry a persona; their request options are not
+    OpenCode provider config, so nothing is written for them.
     """
     from . import thinking
+
+    if card.provider != "ollama":
+        return []
 
     changed: list[str] = []
     if card.think is not None:

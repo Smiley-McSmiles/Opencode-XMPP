@@ -141,7 +141,7 @@ existing chats.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `base_model_id` | yes* | Ollama model to run, e.g. `gemma4:latest` or `ollama/gemma4:latest`. |
+| `base_model_id` | yes* | Model to run. Ollama can be bare (`gemma4:latest`) or prefixed (`ollama/gemma4:latest`); cloud models need the provider prefix, e.g. `openrouter/minimax/minimax-m3.1-flash` or `venice/deepseek-v4-1-flash-1017-uncensored`. |
 | `id` | yes* | The name you type after `model`. Falls back to `slug` or `name`. |
 | `name` | yes* | Display name in `help`. Falls back to `id`. |
 
@@ -160,7 +160,11 @@ runs `ollama/gemma4:26b`. The extra Open WebUI fields in an export (`version_id`
 file but ignored by the bridge.
 
 `base_model_id` must be a model opencode can see (`opencode models`). If the bridge is
-restricted to the `ollama` provider, only Ollama bases are accepted.
+restricted to one provider, only cards on that provider are listed and accepted.
+
+A **cloud card** carries a persona and a provider/model, but not Ollama request options:
+`params.num_ctx`, sampling keys and `think` are ignored for OpenRouter/Venice (they are
+not OpenCode provider config). The model still runs with the provider's own defaults.
 
 ### Persona
 

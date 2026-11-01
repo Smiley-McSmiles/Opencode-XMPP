@@ -252,6 +252,41 @@ def list_sessions(settings: RunSettings, timeout: float = 20.0) -> list[dict]:
     return [item for item in data if isinstance(item, dict) and item.get("id")]
 
 
+def export_credential(settings: RunSettings, provider: str,
+                      timeout: float = 30.0) -> str | None:
+    """The stored API key for a provider, or None.
+
+    The bridge runs as the same Unix user as opencode, so its credential store
+    is the bridge's. The key is returned in memory only; callers must never log
+    it or put it in a command line.
+    """
+    binary = find_binary(settings)
+    if not binary:
+        return None
+    env = os.environ.copy()
+    env.setdefault("HOME", str(Path.home()))
+    for key, value in settings.env:
+        env[str(key)] = str(value)
+    try:
+        result = subprocess.run(
+            [binary, "--standalone", "auth", "export", provider],
+            cwd=_workspace(settings), env=env, capture_output=True, text=True,
+            timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError:
+        return None
+    for item in data if isinstance(data, list) else []:
+        value = item.get("value") if isinstance(item, dict) else None
+        if isinstance(value, dict) and value.get("type") == "key" and value.get("key"):
+            return str(value["key"])
+    return None
+
+
 def delete_session(settings: RunSettings, session_id: str, timeout: float = 30.0) -> tuple[bool, str]:
     """Delete one opencode session (and its children) as the bridge user.
 

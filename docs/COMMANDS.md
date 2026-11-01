@@ -15,6 +15,7 @@ broken.
 | [`session`](#sessions--session--close) | anyone | DM | Continue one of those sessions |
 | [`close`](#sessions--session--close) | anyone | DM | Delete one of those sessions |
 | [`compact`](#compact) | anyone | DM | Ask opencode to compact the session now |
+| [`image`](#image) | owner | DM | Generate an image and send it as an attachment |
 | [`repair`](#repair) | owner | DM | Model-free diagnostics |
 | [`restart`](#restart) | owner | DM | Restart this bridge's unit |
 | [`invite`](#invite) | owner | DM | Add a contact |
@@ -39,8 +40,10 @@ the conversation was. Available to everyone, including guests.
 
 Without `stop`, sending a new message while the agent is working counts as an
 interrupt: the current answer is dropped and your new text is answered next, in the
-same session. Set `[policy] on_new_message = "queue"` if you prefer answers to finish
-first. A turn that carries a photo or voice note is never interrupted.
+same session. Messages sent back-to-back are held for `[policy] message_debounce_ms`
+(default 1200 ms), merged into one turn, and answered once. Set
+`on_new_message = "queue"` if you prefer answers to finish first. A turn that carries
+a photo or voice note is never interrupted.
 
 ## help
 
@@ -50,8 +53,8 @@ Available to everyone in a direct chat, with a role-specific menu:
 - the active card,
 - the cards that role may select, as `id — name` only.
 
-`help` lists **cards only** — it never dumps every model Ollama has, and it never
-prints a base model path. The tier's default card is marked `[default]`.
+`help` lists **cards only** — it never dumps every model the provider has, and it
+never prints a base model path. The tier's default card is marked `[default]`.
 
 | | Sees |
 | --- | --- |
@@ -172,6 +175,32 @@ Compaction requested for session ses_… . opencode will fold the history at its
 It uses the session you are currently in (the pinned one, or the derived one) and does
 not switch or delete anything. If the chat has not sent a message yet there is nothing
 to compact, and the reply says so.
+
+## image
+
+```text
+image a red fox in the snow
+draw a red fox in the snow
+image venice a red fox in the snow
+image openrouter a red fox in the snow
+```
+
+Owner-only. The bridge calls the provider's image API itself, using the bot user's
+stored OpenCode credential; the agent never sees the key. The result is encrypted and
+uploaded like any other attachment.
+
+Config:
+
+```toml
+[images]
+provider = "venice"                       # or "openrouter"; empty disables this
+venice_model = "grok-imagine-image"
+openrouter_model = "google/gemini-3.1-flash-image"
+safe_mode = true                          # Venice: blur adult output
+```
+
+`image <provider> <prompt>` overrides the default only for that request. If the
+provider credential is missing, log in as the bot user with `opencode auth login`.
 
 ## clear
 

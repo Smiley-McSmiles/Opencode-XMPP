@@ -24,6 +24,7 @@ SESSIONS_WORDS = frozenset({"sessions"})
 SESSION_WORDS = frozenset({"session"})
 CLOSE_WORDS = frozenset({"close"})
 COMPACT_WORDS = frozenset({"compact"})
+IMAGE_WORDS = frozenset({"image", "draw"})
 THINK_COMMANDS = {
     "think-off": "off",
     "think_off": "off",
@@ -100,6 +101,14 @@ def _session_argument(text: str, words: frozenset[str]) -> str | None:
 def session_command(text: str) -> str | None:
     """``2``/``ses_...`` from ``session <n|id>``, ``""`` bare, else None."""
     return _session_argument(text, SESSION_WORDS)
+
+
+def image_command(text: str) -> str | None:
+    """The prompt from ``image <prompt>`` or ``draw <prompt>``, else None."""
+    tokens = (text or "").split()
+    if not tokens or tokens[0].lower().rstrip(":,") not in IMAGE_WORDS:
+        return None
+    return " ".join(tokens[1:]).strip()
 
 
 def compact_command(text: str) -> bool:

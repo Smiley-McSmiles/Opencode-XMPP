@@ -73,6 +73,9 @@ allowed_providers = []
 # "interrupt" stops the turn in flight and answers the new message next;
 # "queue" lets the turn finish first. Attachments are never interrupted.
 on_new_message = "interrupt"
+# Wait this long before answering, so messages sent back-to-back become one
+# turn and one answer. 0 disables it.
+message_debounce_ms = 1200
 # Bump this to give every contact a clean conversation without deleting
 # anything: the derived session id changes for everyone.
 session_id_version = "1"
@@ -111,6 +114,16 @@ interim_messages = false
 max_interim_messages = 3
 spool_dir = "~/.opencode-xmpp/spool"
 omemo_storage = "~/.opencode-xmpp/omemo.json"
+
+[images]
+# Owner-only `image <prompt>` command. Empty provider disables it.
+#   provider = "openrouter"   # or "venice"
+provider = ""
+openrouter_model = "google/gemini-3.1-flash-image"
+venice_model = "grok-imagine-image"
+# Venice Safe Venice blurs adult output; set false if the bot is for that.
+safe_mode = true
+timeout_s = 180
 
 [rooms]
 # Rooms to join on startup. An empty join list disables multi-user chat.

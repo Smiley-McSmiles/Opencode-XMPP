@@ -76,6 +76,9 @@ class Policy:
     # What a message does to the answer already in flight: "interrupt" stops it
     # and answers the new text next, "queue" lets it finish and then answers.
     on_new_message: str = "interrupt"
+    # Wait this long after a message before running the turn, so a burst of
+    # messages is merged into one answer. 0 disables the debounce.
+    message_debounce_ms: int = 1200
     # Part of the derived session id. Bump it to give every contact a clean
     # conversation without deleting anything.
     session_id_version: str = "1"
@@ -137,6 +140,19 @@ class Rooms:
 
 
 @dataclass(frozen=True)
+class Images:
+    """Defaults for the owner-only image generation command."""
+
+    # "openrouter", "venice", or empty to disable the command.
+    provider: str = ""
+    openrouter_model: str = ""
+    venice_model: str = ""
+    # Venice's Safe Venice mode blurs adult output. Card/persona use may want it off.
+    safe_mode: bool = True
+    timeout_s: float = 180.0
+
+
+@dataclass(frozen=True)
 class Config:
     account: Account
     admin: Tier
@@ -145,6 +161,7 @@ class Config:
     opencode: Opencode = field(default_factory=Opencode)
     features: Features = field(default_factory=Features)
     rooms: Rooms = field(default_factory=Rooms)
+    images: Images = field(default_factory=Images)
     repair: Repair = field(default_factory=Repair)
     path: Path = field(default=DEFAULT_CONFIG_PATH)
 
@@ -246,6 +263,7 @@ def load(path: str | Path = DEFAULT_CONFIG_PATH) -> Config:
             if str(provider).strip()
         ),
         on_new_message=str(policy_raw.get("on_new_message", "interrupt")).lower(),
+        message_debounce_ms=min(5000, max(0, int(policy_raw.get("message_debounce_ms", 1200)))),
         session_id_version=str(policy_raw.get("session_id_version", "1")).strip() or "1",
         restart_unit=str(policy_raw.get("restart_unit", "")).strip(),
     )
@@ -288,6 +306,18 @@ def load(path: str | Path = DEFAULT_CONFIG_PATH) -> Config:
     if rooms.respond not in ("mention", "always"):
         raise ConfigError("rooms.respond must be 'mention' or 'always'")
 
+    images_raw = raw.get("images") or {}
+    images_provider = str(images_raw.get("provider", "")).strip().lower()
+    if images_provider not in ("", "openrouter", "venice"):
+        raise ConfigError("images.provider must be 'openrouter', 'venice' or empty")
+    images = Images(
+        provider=images_provider,
+        openrouter_model=str(images_raw.get("openrouter_model", "")).strip(),
+        venice_model=str(images_raw.get("venice_model", "")).strip(),
+        safe_mode=bool(images_raw.get("safe_mode", True)),
+        timeout_s=float(images_raw.get("timeout_s", 180.0)),
+    )
+
     repair_raw = raw.get("repair") or {}
     repair = Repair(
         plaintext=bool(repair_raw.get("plaintext", Repair.plaintext)),
@@ -307,5 +337,5 @@ def load(path: str | Path = DEFAULT_CONFIG_PATH) -> Config:
         raise ConfigError("features.max_inline_image_mb must be positive")
 
     return Config(account=account, admin=admin, guest=guest, policy=policy,
-                  opencode=opencode, features=features, rooms=rooms, repair=repair,
-                  path=p)
+                  opencode=opencode, features=features, rooms=rooms, images=images,
+                  repair=repair, path=p)
