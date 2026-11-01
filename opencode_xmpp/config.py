@@ -152,6 +152,8 @@ class Images:
     aspect_ratio: str = ""
     # Venice's Safe Venice mode blurs adult output. Card/persona use may want it off.
     safe_mode: bool = True
+    # Ask Venice not to stamp its watermark on generated images.
+    hide_watermark: bool = False
     timeout_s: float = 180.0
 
 
@@ -320,6 +322,7 @@ def load(path: str | Path = DEFAULT_CONFIG_PATH) -> Config:
         venice_edit_model=str(images_raw.get("venice_edit_model", "qwen-edit-uncensored")).strip(),
         aspect_ratio=str(images_raw.get("aspect_ratio", "")).strip(),
         safe_mode=bool(images_raw.get("safe_mode", True)),
+        hide_watermark=bool(images_raw.get("hide_watermark", False)),
         timeout_s=float(images_raw.get("timeout_s", 180.0)),
     )
 

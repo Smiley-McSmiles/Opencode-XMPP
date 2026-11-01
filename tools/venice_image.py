@@ -25,7 +25,7 @@ import urllib.request
 from pathlib import Path
 
 API = "https://api.venice.ai/api/v1"
-DEFAULT_GENERATE = "grok-imagine-image"
+DEFAULT_GENERATE = "chroma"
 DEFAULT_EDIT = "qwen-edit-uncensored"
 
 
@@ -115,7 +115,9 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument("--safe-mode", dest="safe_mode", action="store_true")
     parser.add_argument("--no-safe-mode", dest="safe_mode", action="store_false")
-    parser.set_defaults(safe_mode=False)
+    parser.add_argument("--hide-watermark", dest="hide_watermark", action="store_true")
+    parser.add_argument("--no-hide-watermark", dest="hide_watermark", action="store_false")
+    parser.set_defaults(safe_mode=False, hide_watermark=True)
     args = parser.parse_args()
 
     key = venice_key()
@@ -148,6 +150,7 @@ def main() -> int:
             "format": "png",
             "return_binary": True,
             "safe_mode": args.safe_mode,
+            "hide_watermark": args.hide_watermark,
         }
         if args.aspect_ratio:
             body["aspect_ratio"] = args.aspect_ratio

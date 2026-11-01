@@ -198,11 +198,12 @@ Config:
 ```toml
 [images]
 provider = "venice"                       # or "openrouter"; empty disables this
-venice_model = "grok-imagine-image"
+venice_model = "chroma"
 venice_edit_model = "qwen-edit-uncensored"
 openrouter_model = "google/gemini-3.1-flash-image"
 aspect_ratio = ""                         # e.g. "9:16"
 safe_mode = true                          # Venice: blur adult output
+hide_watermark = true                     # Venice: omit its watermark
 ```
 
 `image <provider> <prompt>` overrides the default only for that request. If the

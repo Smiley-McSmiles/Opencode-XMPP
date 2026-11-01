@@ -127,26 +127,28 @@ def _openrouter(model: str, prompt: str, api_key: str, timeout: float) -> bytes:
 
 
 def _venice(model: str, prompt: str, api_key: str, timeout: float,
-            safe_mode: bool) -> bytes:
+            safe_mode: bool, hide_watermark: bool) -> bytes:
     if not model:
         raise ImageError("No Venice image model is configured.")
-    data = _post_json(VENICE_URL, {
+    raw, content_type = _post_raw(VENICE_URL, {
         "model": model,
         "prompt": prompt,
         "format": "png",
+        "return_binary": True,
         "safe_mode": safe_mode,
+        "hide_watermark": hide_watermark,
     }, api_key, timeout)
-    images = data.get("images")
-    if not isinstance(images, list) or not images:
-        omitted = data.get("content_policy_violation_count")
-        if omitted:
-            raise ImageError("Venice omitted the image under its content policy.")
-        raise ImageError("Venice returned no image.")
     try:
-        blob = base64.b64decode(str(images[0]), validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise ImageError("Venice returned an unreadable image.", str(exc)) from exc
-    return blob
+        return _bytes_from_response(raw, content_type)
+    except ImageError:
+        # A JSON error body may carry the content-policy count.
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise
+        if isinstance(data, dict) and data.get("content_policy_violation_count"):
+            raise ImageError("Venice omitted the image under its content policy.") from None
+        raise
 
 
 def _bytes_from_response(raw: bytes, content_type: str) -> bytes:
@@ -197,7 +199,8 @@ def edit(provider: str, model: str, prompt: str, api_key: str, image: bytes,
 
 
 def generate(provider: str, model: str, prompt: str, api_key: str,
-             timeout: float = 180.0, safe_mode: bool = True) -> bytes:
+             timeout: float = 180.0, safe_mode: bool = True,
+             hide_watermark: bool = False) -> bytes:
     """Generate one image and return its bytes. Raises ImageError."""
     prompt = (prompt or "").strip()
     if not prompt:
@@ -207,7 +210,7 @@ def generate(provider: str, model: str, prompt: str, api_key: str,
     if provider == "openrouter":
         return _openrouter(model, prompt, api_key, timeout)
     if provider == "venice":
-        return _venice(model, prompt, api_key, timeout, safe_mode)
+        return _venice(model, prompt, api_key, timeout, safe_mode, hide_watermark)
     raise ImageError(f"Unknown image provider {provider!r}.")
 
 

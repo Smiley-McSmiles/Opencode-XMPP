@@ -120,12 +120,14 @@ omemo_storage = "~/.opencode-xmpp/omemo.json"
 #   provider = "openrouter"   # or "venice"
 provider = ""
 openrouter_model = "google/gemini-3.1-flash-image"
-venice_model = "grok-imagine-image"
+venice_model = "chroma"
 venice_edit_model = "qwen-edit-uncensored"
 # Output aspect ratio for image/edit, e.g. "9:16"; empty uses the model default.
 aspect_ratio = ""
 # Venice Safe Venice blurs adult output; set false if the bot is for that.
 safe_mode = true
+# Ask Venice not to stamp a watermark on generated images.
+hide_watermark = false
 timeout_s = 180
 
 [rooms]

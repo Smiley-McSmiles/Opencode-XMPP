@@ -1358,7 +1358,8 @@ class Bridge(slixmpp.ClientXMPP):
             else:
                 blob = await asyncio.to_thread(
                     images.generate, provider, model, prompt, api_key,
-                    self.cfg.images.timeout_s, self.cfg.images.safe_mode)
+                    self.cfg.images.timeout_s, self.cfg.images.safe_mode,
+                    self.cfg.images.hide_watermark)
         except images.ImageError as exc:
             await self._reply(key, item, exc.user_message)
             return

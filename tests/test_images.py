@@ -29,11 +29,13 @@ def test_openrouter_extracts_an_inline_image(monkeypatch):
     assert images.generate("openrouter", "google/gemini-image", "a fox", "key") == PNG
 
 
-def test_venice_decodes_base64(monkeypatch):
-    monkeypatch.setattr(images, "_post_json", lambda *args, **kwargs: {
-        "images": [base64.b64encode(PNG).decode()]
-    })
-    assert images.generate("venice", "grok-imagine-image", "a fox", "key") == PNG
+def test_venice_accepts_json_or_binary(monkeypatch):
+    payload = base64.b64encode(PNG).decode()
+    monkeypatch.setattr(images, "_post_raw", lambda *args, **kwargs: (
+        f'{{"images": ["{payload}"]}}'.encode(), "application/json"))
+    assert images.generate("venice", "chroma", "a fox", "key") == PNG
+    monkeypatch.setattr(images, "_post_raw", lambda *args, **kwargs: (PNG, "image/png"))
+    assert images.generate("venice", "chroma", "a fox", "key") == PNG
 
 
 def test_openrouter_text_without_an_image_is_an_error(monkeypatch):
@@ -62,7 +64,7 @@ def _fake(tmp_path):
         images=SimpleNamespace(provider="venice",
                                venice_model="grok-imagine-image",
                                openrouter_model="google/gemini-image",
-                               timeout_s=180, safe_mode=True),
+                               timeout_s=180, safe_mode=True, hide_watermark=False),
         features=SimpleNamespace(uploads=True, max_upload_mb=40),
         admin=SimpleNamespace(model="venice/deepseek", agent="xmpp-admin",
                               auto_approve=True, timeout_s=600),
@@ -134,6 +136,19 @@ def test_export_credential_reads_the_key_from_the_store(monkeypatch):
     monkeypatch.setattr(cli.subprocess, "run", lambda *args, **kwargs: Result())
     settings = cli.RunSettings(binary="opencode", workspace="~")
     assert cli.export_credential(settings, "venice") == "secret-key"
+
+
+def test_venice_generation_sends_hide_watermark(monkeypatch):
+    seen = {}
+
+    def fake_post(url, body, key, timeout):
+        seen.update(body)
+        return PNG, "image/png"
+
+    monkeypatch.setattr(images, "_post_raw", fake_post)
+    images.generate("venice", "chroma", "a fox", "key", hide_watermark=True)
+    assert seen["return_binary"] is True
+    assert seen["hide_watermark"] is True
 
 
 def test_venice_edit_posts_the_source_image(monkeypatch):
