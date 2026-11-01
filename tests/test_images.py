@@ -183,3 +183,20 @@ def test_image_edit_uses_the_attached_source(monkeypatch, tmp_path):
         "edit make it blue\nhttps://upload.example.org/src.png"))
     assert attachments == ["aesgcm://upload.example.org/edited.png#00"]
     assert calls and calls[0][0] == "https://upload.example.org/src.png"
+
+
+def test_keep_image_keeps_only_the_latest_five(tmp_path):
+    from opencode_xmpp import bot as botmod
+
+    fake = SimpleNamespace(_media=tmp_path / "media")
+    fake._keep_image = MethodType(botmod.Bridge._keep_image, fake)
+    fake._latest_image = MethodType(botmod.Bridge._latest_image, fake)
+    for index in range(7):
+        source = tmp_path / f"src-{index}.png"
+        source.write_bytes(PNG + bytes([index]))
+        kept = fake._keep_image("local@example.org", source)
+        assert kept.stat().st_mode & 0o777 == 0o600
+    folder = tmp_path / "media" / "local@example.org"
+    assert len(list(folder.iterdir())) == 5
+    assert fake._latest_image("local@example.org") is not None
+    assert fake._latest_image("other@example.org") is None

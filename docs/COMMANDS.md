@@ -188,8 +188,10 @@ image edit make the jacket blue        # with a photo attached to this message
 
 Owner-only. The bridge calls the provider's image API itself, using the bot user's
 stored OpenCode credential; the agent never sees the key. The result is encrypted and
-uploaded like any other attachment. `image edit` uses Venice's image-to-image model on
-the image attached to the same message.
+uploaded like any other attachment. `image edit` uses Venice's image-to-image model on an upload-host URL in the command.
+XMPP normally sends a photo as a separate message, so the bridge also keeps the last
+few owner images; the agent sees `[Most recent image in this chat: /path]` and can edit
+that file with the Python helper below.
 
 Config:
 

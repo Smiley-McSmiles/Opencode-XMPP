@@ -46,3 +46,8 @@ commands whose output is short and relevant.
       python3 ~/bin/venice_image.py --prompt "..." --out ~/work/img/out.png --no-safe-mode
       python3 ~/bin/venice_image.py --image /absolute/source.png --prompt "..." --out ~/work/img/out.png --no-safe-mode --aspect-ratio 9:16
   Then put `[[attach: /absolute/out.png]]` on its own line so the bridge sends it.
+- The bridge keeps the last few images the owner sent. A turn may include
+  `[Most recent image in this chat: /path]` or `[image attached: /path]`.
+  To change one, pass that path to the helper with `--image`; for a new image,
+  omit `--image`. Always finish by sending the result with
+  `[[attach: /absolute/path]]` on its own line.

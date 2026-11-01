@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import threading
 import time
@@ -124,6 +125,7 @@ class _Chat:
     session_pin: str = ""            # ``session`` selection; empty = the derived one
     session_checked: bool = False    # looked for a legacy session on the first turn
     session_ids: set[str] = field(default_factory=set)  # every session used here
+    last_image: Path | None = None   # most recent owner image kept for editing
 
 
 MUC_USER_NS = "http://jabber.org/protocol/muc#user"
@@ -237,6 +239,8 @@ class Bridge(slixmpp.ClientXMPP):
         self._pending = approvals.PendingStore(
             Path(cfg.features.omemo_storage).expanduser().with_name(f"pending-{_instance}.json"))
         self._spool = Path(cfg.features.spool_dir).expanduser()
+        # Inbound owner images are kept here (0600) so a later turn can edit them.
+        self._media = self._spool.parent / "media"
         # Last time we told the owners a room's OMEMO is unreadable (room -> epoch).
         self._room_warned: dict[str, float] = {}
         # Turn counters for the optional manual compaction safety net.
@@ -1769,6 +1773,36 @@ class Bridge(slixmpp.ClientXMPP):
             self._pins.set(key, chat.session_pin)
             log.info("%s adopted the most recent legacy session %s", key, chat.session_pin)
 
+    def _keep_image(self, sender: str, path: Path) -> Path:
+        """Copy an inbound owner image to a stable path, keeping the last few."""
+        folder = self._media / bare_jid(sender)
+        folder.mkdir(parents=True, exist_ok=True)
+        folder.chmod(0o700)
+        suffix = path.suffix.lower() or ".png"
+        target = folder / f"{int(time.time())}-{uuid.uuid4().hex[:8]}{suffix}"
+        shutil.copyfile(path, target)
+        target.chmod(0o600)
+        try:
+            old = sorted(folder.glob("*"), key=lambda item: item.stat().st_mtime,
+                         reverse=True)
+        except OSError:
+            old = []
+        for item in old[5:]:
+            with contextlib.suppress(OSError):
+                item.unlink()
+        return target
+
+    def _latest_image(self, sender: str) -> Path | None:
+        folder = self._media / bare_jid(sender)
+        if not folder.is_dir():
+            return None
+        try:
+            files = sorted(folder.glob("*"), key=lambda item: item.stat().st_mtime,
+                           reverse=True)
+        except OSError:
+            return None
+        return files[0] if files else None
+
     async def _handle_turn(self, key: str, chat: _Chat, item: dict) -> None:
         room = item.get("room")
         if room:
@@ -1785,14 +1819,19 @@ class Bridge(slixmpp.ClientXMPP):
             settings = replace(settings, model=model)
         who = f"{item.get('nick')} in the group chat {room}" if room else sender
         preamble = _turn_preamble(self.cfg, who, room)
-        body = preamble + item["body"]
+        body = preamble
+        if tier == OWNER:
+            if chat.last_image is None:
+                chat.last_image = self._latest_image(sender)
+            if chat.last_image is not None:
+                body += f"[Most recent image in this chat: {chat.last_image}]\n"
         card = self._active_card(chat, tier)
         if card is not None:
             await self._ensure_card_applied(card)
             card_system = cards.render_system(card, sender)
             if card_system:
-                body = (preamble + f"[Active model card: {card.name}]\n"
-                        f"{card_system}\n\n" + item["body"])
+                body += f"[Active model card: {card.name}]\n{card_system}\n\n"
+        body += item["body"]
 
         notes: list[str] = []
         files: list[str] = []
@@ -1826,10 +1865,19 @@ class Bridge(slixmpp.ClientXMPP):
                     saved, suffix = converted, ".png"
                 if (is_image or is_audio) and self.cfg.features.inline_images:
                     kind = "image" if is_image else "audio"
+                    attached = saved
                     try:
                         if saved.stat().st_size <= self.cfg.features.max_inline_image_mb * 1024 * 1024:
-                            files.append(str(saved))
-                            notes.append(f"[{kind} attached: {saved.name}]" if tier == OWNER
+                            if is_image and tier == OWNER:
+                                try:
+                                    attached = await asyncio.to_thread(
+                                        self._keep_image, sender, saved)
+                                    chat.last_image = attached
+                                except OSError as exc:
+                                    log.warning("could not keep image for %s: %s", sender, exc)
+                                    attached = saved
+                            files.append(str(attached))
+                            notes.append(f"[{kind} attached: {attached}]" if tier == OWNER
                                          else f"[{kind} attached]")
                         else:
                             notes.append(f"[{kind} too large to attach]")

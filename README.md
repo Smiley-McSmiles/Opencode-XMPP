@@ -105,7 +105,9 @@ itself, using the bot user's OpenCode credential. The result is uploaded encrypt
 sent like any other attachment. Set `[images] provider` and the provider's model in the
 config; `image openrouter …` / `image venice …` overrides the default for one request.
 `image edit <prompt>` with a photo attached edits that photo through Venice
-(`venice_edit_model`, `aspect_ratio`).
+(`venice_edit_model`, `aspect_ratio`). XMPP usually sends a photo as its own message, so
+the bridge also keeps the last few owner images and tells the model their paths; the
+agent can then edit one with the Python helper and attach the result.
 
 **Cloud model cards.** A card can target a cloud model by putting the full provider id
 in `base_model_id`, e.g. `openrouter/minimax/minimax-m3.1-flash` or
