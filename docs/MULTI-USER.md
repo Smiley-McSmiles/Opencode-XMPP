@@ -97,7 +97,13 @@ The unit name comes from the bot JID's local part, so they are
 The provider of each bot's `default.json` (or of `[admin] model` when it has no default
 card) acts as a **provider fence**: an Ollama bot cannot switch to a hosted model and a
 hosted bot cannot silently fall back to a local one. That matters when the promise is
-"this conversation stays on this machine".
+"this conversation stays on this machine". A bot that deliberately spans cloud
+providers can say so:
+
+```toml
+[policy]
+allowed_providers = ["openrouter", "venice"]
+```
 
 If two bots should not answer each other, put their JIDs in `[policy] ignore_jids`:
 

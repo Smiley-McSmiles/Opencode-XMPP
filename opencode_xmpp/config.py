@@ -70,6 +70,9 @@ class Policy:
     max_chunk_chars: int = 3800
     rate_limit_per_minute: int = 8
     quiet_unknown_senders: bool = False
+    # Providers this bridge may use (e.g. ("openrouter", "venice")). Empty
+    # derives the single provider from [admin]/[guest] model or the default card.
+    allowed_providers: tuple[str, ...] = ()
     # What a message does to the answer already in flight: "interrupt" stops it
     # and answers the new text next, "queue" lets it finish and then answers.
     on_new_message: str = "interrupt"
@@ -237,6 +240,11 @@ def load(path: str | Path = DEFAULT_CONFIG_PATH) -> Config:
         max_chunk_chars=int(policy_raw.get("max_chunk_chars", 3800)),
         rate_limit_per_minute=int(policy_raw.get("rate_limit_per_minute", 8)),
         quiet_unknown_senders=bool(policy_raw.get("quiet_unknown_senders", False)),
+        allowed_providers=tuple(
+            str(provider).strip().lower()
+            for provider in (policy_raw.get("allowed_providers") or ())
+            if str(provider).strip()
+        ),
         on_new_message=str(policy_raw.get("on_new_message", "interrupt")).lower(),
         session_id_version=str(policy_raw.get("session_id_version", "1")).strip() or "1",
         restart_unit=str(policy_raw.get("restart_unit", "")).strip(),

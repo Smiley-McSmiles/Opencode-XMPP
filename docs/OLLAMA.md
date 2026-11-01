@@ -70,7 +70,8 @@ agent = "xmpp-admin"
 
 The provider of `default.json` (or of `[admin] model` when it is set) is the only
 provider this instance uses: an Ollama bot never shows or accepts hosted models, so a
-private local chat cannot leave the host by accident.
+private local chat cannot leave the host by accident. `[policy] allowed_providers`
+can list more than one provider explicitly when a bot really needs it.
 
 ## 3. Context window
 

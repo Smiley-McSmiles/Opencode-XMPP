@@ -998,11 +998,22 @@ class Bridge(slixmpp.ClientXMPP):
                 return card.model.split("/", 1)[0].strip().lower()
         return ""
 
-    def _model_allowed(self, model: str) -> bool:
+    def _allowed_providers(self) -> tuple[str, ...]:
+        """The providers this bridge may use; explicit config wins."""
+        configured = tuple(provider for provider in self.cfg.policy.allowed_providers if provider)
+        if configured:
+            return configured
         provider = self._allowed_provider()
-        if not provider:
+        return (provider,) if provider else ()
+
+    def _provider_label(self) -> str:
+        return ", ".join(self._allowed_providers())
+
+    def _model_allowed(self, model: str) -> bool:
+        allowed = self._allowed_providers()
+        if not allowed:
             return True
-        return "/" in model and model.split("/", 1)[0].strip().lower() == provider
+        return "/" in model and model.split("/", 1)[0].strip().lower() in allowed
 
     @staticmethod
     def _write_opencode_config(path: Path, data: dict) -> None:
@@ -1164,7 +1175,7 @@ class Bridge(slixmpp.ClientXMPP):
                 await self._reply(
                     key, item,
                     f"The default card uses {card.base_model}, but this bridge is "
-                    f"restricted to {self._allowed_provider()} models.")
+                    f"restricted to {self._provider_label()} models.")
                 return
             await self._select_card(key, item, chat, card)
             return
@@ -1220,7 +1231,7 @@ class Bridge(slixmpp.ClientXMPP):
             await self._reply(
                 key, item,
                 f"Card {card.name} uses {card.base_model}, but this bridge is restricted "
-                f"to {self._allowed_provider()} models.")
+                f"to {self._provider_label()} models.")
             return
         await self._select_card(key, item, chat, card)
 

@@ -67,6 +67,9 @@ rate_limit_per_minute = 8
 # true: answer owners and anyone in the roster (an approved contact/invite),
 #       and stay silent for everyone else. false: answer every guest.
 quiet_unknown_senders = false
+# Providers this bridge may use, e.g. ["openrouter", "venice"]. Empty means
+# derive one provider from [admin]/[guest] model (or the default card).
+allowed_providers = []
 # "interrupt" stops the turn in flight and answers the new message next;
 # "queue" lets the turn finish first. Attachments are never interrupted.
 on_new_message = "interrupt"

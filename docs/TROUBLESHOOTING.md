@@ -150,10 +150,16 @@ reload; keeping `OLLAMA_NUM_PARALLEL=1` and a long `OLLAMA_KEEP_ALIVE` avoids it
 
 ## "No card or allowed model matches" or "restricted to … models"
 
-Guests can only select cards. Owners may also use a full `provider/model`, provided it
-is in the bridge's provider (for example `openrouter/minimax/minimax-m3.1-flash`); if
-it is not listed by `opencode models`, the id is wrong. Add a card instead if you want
-its persona or Ollama options.
+Guests can only select cards. Owners may also use a full `provider/model`, provided its
+provider is allowed (for example `openrouter/minimax/minimax-m3.1-flash`); if it is not
+listed by `opencode models`, the id is wrong. To allow more than one provider:
+
+```toml
+[policy]
+allowed_providers = ["openrouter", "venice"]
+```
+
+Add a card instead if you want its persona or Ollama options.
 
 A guest sees only `models/guest/`, so a card in the root or `models/admin/` is
 invisible and unselectable for them. Move it into `models/guest/` if a guest should
