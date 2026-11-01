@@ -1563,11 +1563,15 @@ class Bridge(slixmpp.ClientXMPP):
                 chat.session_ids.clear()
                 chat.session_pin = ""
                 self._pins.set(key, "")
-                log.info("cleared context for %s (%d session(s))", key, deleted)
+                chat.last_image = None
+                dropped = await asyncio.to_thread(self._forget_images, key)
+                log.info("cleared context for %s (%d session(s), %d image(s))",
+                         key, deleted, dropped)
+                note = f" and {dropped} kept image(s)" if dropped else ""
                 await self._reply(
                     key, item,
-                    f"Context cleared: deleted {deleted} OpenCode session(s) for this contact. "
-                    "The next message starts a fresh session.")
+                    f"Context cleared: deleted {deleted} OpenCode session(s){note} for "
+                    "this contact. The next message starts a fresh session.")
         finally:
             chat.clearing = False
             chat.suppress = False
@@ -1774,9 +1778,14 @@ class Bridge(slixmpp.ClientXMPP):
             self._pins.set(key, chat.session_pin)
             log.info("%s adopted the most recent legacy session %s", key, chat.session_pin)
 
-    def _keep_image(self, sender: str, path: Path) -> Path:
+    def _media_dir(self, sender: str, tier: str) -> Path:
+        """Owner and guest images live in separate trees, never the same folder."""
+        role = "admin" if tier == OWNER else "guest"
+        return self._media / role / bare_jid(sender)
+
+    def _keep_image(self, sender: str, path: Path, tier: str = OWNER) -> Path:
         """Copy an inbound owner image to a stable path, keeping the last few."""
-        folder = self._media / bare_jid(sender)
+        folder = self._media_dir(sender, tier)
         folder.mkdir(parents=True, exist_ok=True)
         folder.chmod(0o700)
         suffix = path.suffix.lower() or ".png"
@@ -1793,8 +1802,35 @@ class Bridge(slixmpp.ClientXMPP):
                 item.unlink()
         return target
 
-    def _latest_image(self, sender: str) -> Path | None:
-        folder = self._media / bare_jid(sender)
+    def _forget_images(self, sender: str) -> int:
+        """Delete every image kept for this contact, in any tier.
+
+        ``clear`` is "start over", so it drops the admin tree, the guest tree and
+        anything left in the old unsplit layout; returns how many files went.
+        """
+        jid = bare_jid(sender)
+        folders = [self._media / role / jid for role in ("admin", "guest")]
+        folders.append(self._media / jid)
+        removed = 0
+        for folder in folders:
+            if not folder.is_dir():
+                continue
+            try:
+                entries = list(folder.iterdir())
+            except OSError:
+                continue
+            for entry in entries:
+                try:
+                    entry.unlink()
+                except OSError:
+                    continue
+                removed += 1
+            with contextlib.suppress(OSError):
+                folder.rmdir()
+        return removed
+
+    def _latest_image(self, sender: str, tier: str = OWNER) -> Path | None:
+        folder = self._media_dir(sender, tier)
         if not folder.is_dir():
             return None
         try:
@@ -1823,9 +1859,12 @@ class Bridge(slixmpp.ClientXMPP):
         body = preamble
         if tier == OWNER:
             if chat.last_image is None:
-                chat.last_image = self._latest_image(sender)
+                chat.last_image = self._latest_image(sender, tier)
             if chat.last_image is not None:
                 body += f"[Most recent image in this chat: {chat.last_image}]\n"
+        else:
+            # A guest never sees an owner image path, even for the same JID.
+            chat.last_image = None
         card = self._active_card(chat, tier)
         if card is not None:
             await self._ensure_card_applied(card)
@@ -1872,7 +1911,7 @@ class Bridge(slixmpp.ClientXMPP):
                             if is_image and tier == OWNER:
                                 try:
                                     attached = await asyncio.to_thread(
-                                        self._keep_image, sender, saved)
+                                        self._keep_image, sender, saved, tier)
                                     chat.last_image = attached
                                 except OSError as exc:
                                     log.warning("could not keep image for %s: %s", sender, exc)

@@ -188,10 +188,15 @@ image edit make the jacket blue        # with a photo attached to this message
 
 Owner-only. The bridge calls the provider's image API itself, using the bot user's
 stored OpenCode credential; the agent never sees the key. The result is encrypted and
-uploaded like any other attachment. `image edit` uses Venice's image-to-image model on an upload-host URL in the command.
-XMPP normally sends a photo as a separate message, so the bridge also keeps the last
-few owner images; the agent sees `[Most recent image in this chat: /path]` and can edit
-that file with the Python helper below.
+uploaded like any other attachment. `image edit` uses Venice's image-to-image model on an
+upload-host URL in the command. XMPP normally sends a photo as a separate message, so the
+bridge also keeps the last few owner images; the agent sees
+`[Most recent image in this chat: /path]` and can edit that file with the Python helper
+below.
+
+Kept images are stored per contact under `media/admin/<bare-jid>/` for owners and
+`media/guest/<bare-jid>/` for guests, so an owner's photos are never visible to a guest
+turn — even for the same JID. `clear` deletes them all for that contact.
 
 Config:
 
@@ -227,11 +232,12 @@ clear
 ```
 
 The "start over" command. It stops any turn in flight, deletes **every** session it can
-find for you (current, pinned, previously used and old scoped ones), and lets the next
+find for you (current, pinned, previously used and old scoped ones), deletes the images
+the bridge kept for you (the ones a later turn could otherwise edit), and lets the next
 message start fresh.
 
-It only ever touches the sender's own sessions. It cannot see or delete another
-contact's context.
+It only ever touches the sender's own sessions and images. It cannot see or delete
+another contact's context.
 
 ## repair
 

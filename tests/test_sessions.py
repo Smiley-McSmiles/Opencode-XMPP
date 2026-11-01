@@ -246,3 +246,53 @@ def test_compact_asks_opencode_for_the_active_session(monkeypatch):
     monkeypatch.setattr(cli, "compact", lambda settings, session_id: False)
     asyncio.run(botmod.Bridge._handle_compact(fake, chat_key, {}))
     assert "couldn't compact" in replies[-1]
+
+
+def test_clear_also_deletes_the_kept_images(monkeypatch, tmp_path):
+    chat = botmod._Chat()
+    chat.session_ids.add("ses_old")
+    chat.last_image = tmp_path / "stale.png"
+    fake, replies = _fake_bridge(chat)
+    fake._media = tmp_path / "media"
+    fake._forget_images = MethodType(botmod.Bridge._forget_images, fake)
+    fake._session_candidates = lambda key, chat, tier: set(chat.session_ids)
+    fake._interrupt = lambda chat: None
+
+    mine = fake._media / "admin" / chat_key
+    mine.mkdir(parents=True)
+    (mine / "a.png").write_bytes(b"mine")
+    guest = fake._media / "guest" / chat_key
+    guest.mkdir(parents=True)
+    (guest / "g.png").write_bytes(b"guest")
+    legacy = fake._media / chat_key
+    legacy.mkdir(parents=True)
+    (legacy / "old.png").write_bytes(b"old")
+    theirs = fake._media / "admin" / "other@example.org"
+    theirs.mkdir(parents=True)
+    (theirs / "b.png").write_bytes(b"theirs")
+
+    monkeypatch.setattr(cli, "delete_session", lambda settings, sid: (True, ""))
+
+    asyncio.run(botmod.Bridge._handle_clear(fake, chat_key, {}))
+
+    assert not mine.exists()
+    assert not guest.exists()
+    assert not legacy.exists()
+    assert (theirs / "b.png").is_file()
+    assert chat.last_image is None
+    assert "3 kept image" in replies[-1]
+
+
+def test_clear_without_images_says_so_plainly(monkeypatch, tmp_path):
+    chat = botmod._Chat()
+    fake, replies = _fake_bridge(chat)
+    fake._media = tmp_path / "media"
+    fake._forget_images = MethodType(botmod.Bridge._forget_images, fake)
+    fake._session_candidates = lambda key, chat, tier: set()
+    fake._interrupt = lambda chat: None
+
+    monkeypatch.setattr(cli, "delete_session", lambda settings, sid: (True, ""))
+
+    asyncio.run(botmod.Bridge._handle_clear(fake, chat_key, {}))
+    assert "Context cleared" in replies[-1]
+    assert "kept image" not in replies[-1]

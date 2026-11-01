@@ -204,6 +204,7 @@ def test_keep_image_keeps_only_the_latest_five(tmp_path):
     from opencode_xmpp import bot as botmod
 
     fake = SimpleNamespace(_media=tmp_path / "media")
+    fake._media_dir = MethodType(botmod.Bridge._media_dir, fake)
     fake._keep_image = MethodType(botmod.Bridge._keep_image, fake)
     fake._latest_image = MethodType(botmod.Bridge._latest_image, fake)
     for index in range(7):
@@ -211,7 +212,33 @@ def test_keep_image_keeps_only_the_latest_five(tmp_path):
         source.write_bytes(PNG + bytes([index]))
         kept = fake._keep_image("local@example.org", source)
         assert kept.stat().st_mode & 0o777 == 0o600
-    folder = tmp_path / "media" / "local@example.org"
+        assert kept.parent == tmp_path / "media" / "admin" / "local@example.org"
+    folder = tmp_path / "media" / "admin" / "local@example.org"
     assert len(list(folder.iterdir())) == 5
     assert fake._latest_image("local@example.org") is not None
     assert fake._latest_image("other@example.org") is None
+
+
+def test_owner_and_guest_images_never_share_a_folder(tmp_path):
+    from opencode_xmpp import bot as botmod
+
+    fake = SimpleNamespace(_media=tmp_path / "media")
+    fake._media_dir = MethodType(botmod.Bridge._media_dir, fake)
+    fake._keep_image = MethodType(botmod.Bridge._keep_image, fake)
+    fake._latest_image = MethodType(botmod.Bridge._latest_image, fake)
+    fake._forget_images = MethodType(botmod.Bridge._forget_images, fake)
+
+    source = tmp_path / "src.png"
+    source.write_bytes(PNG)
+    owner = fake._keep_image("local@example.org", source, botmod.OWNER)
+    guest = fake._keep_image("local@example.org", source, botmod.GUEST)
+
+    assert owner.parent != guest.parent
+    assert owner.parent.parent.name == "admin"
+    assert guest.parent.parent.name == "guest"
+    assert fake._latest_image("local@example.org", botmod.OWNER) == owner
+    assert fake._latest_image("local@example.org", botmod.GUEST) == guest
+
+    assert fake._forget_images("local@example.org") == 2
+    assert fake._latest_image("local@example.org", botmod.OWNER) is None
+    assert fake._latest_image("local@example.org", botmod.GUEST) is None

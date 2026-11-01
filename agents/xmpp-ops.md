@@ -64,3 +64,4 @@ Your reply is delivered verbatim as XMPP chat:
   To change one, pass that path to the helper with `--image`; for a new image,
   omit `--image`. Always finish by sending the result with
   `[[attach: /absolute/path]]` on its own line.
+  They are kept per contact and tier, and `clear` deletes them.
